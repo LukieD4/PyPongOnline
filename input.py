@@ -39,6 +39,7 @@ INPUT_MODES = {
         "down": ["K_DOWN", "K_s"],
         "select": InputManager.universal_select(),
         "create": ["K_c"],
+        "leave": ["K_l"],
         "back": InputManager.universal_back()
     },
     "lost": {

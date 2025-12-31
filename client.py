@@ -118,13 +118,14 @@ class ClientGame:
 
         # Online / Lobby
         self.online_tick = 0
-        self.ui_ellipse = 0
-        self.dots = ""
-
         self.lobbies = []
         self.lobby_index = 0
         self.lobby_input_epoch = 0
-        self.in_lobby = None
+        self.lobby_id, self.lobby_name = None, None
+
+        # ui
+        self.ui_ellipse = 0
+        self.dots = ""
 
         # Mode dispatch
         self.update_methods = {
@@ -221,6 +222,12 @@ class ClientGame:
     #region Actions
 
     def action_initOnlineFromMainMenu(self):
+        # reset lobby state
+        self.lobby_id = None
+        self.lobby_name = None
+        self.lobby_index = 0
+
+        # switch mode
         self.mode = "online-connect"
         self.online_tick = 0
         self.start_network()
@@ -359,7 +366,7 @@ class ClientGame:
 
     # ========================================================
     # Lobby
-    #region Lobby
+    #region Lobby Browse
 
     def updateLobbyBrowser(self):
         keys = pygame.key.get_pressed()
@@ -378,14 +385,41 @@ class ClientGame:
             if msg_type == "lobby_list":
                 self.lobbies = msg.get("lobbies", [])
 
+            elif msg_type == "lobby_status":
+                # set lobby info if joined
+                self.lobby_id = msg.get("id")
+                self.lobby_name = msg.get("name")
+
+
             elif msg_type == "joined_lobby":
-                self.in_lobby = msg.get("id")
+                # should this be here?
+                self.lobby_id = msg.get("id")
+                self.lobby_name = msg.get("name")
 
             elif msg_type == "start_game":
                 self.mode = "transON-init"
 
         # User inputs
         if now - self.lobby_input_epoch > 0.2 and not self.mode in ["transON-init", "transOFF-init"]:
+            
+            # Run these always
+            if inputManager.get_action("create", keys) or inputManager.get_action("leave", keys):
+                if self.lobby_id and inputManager.get_action("leave", keys):
+                    self.net_out.put(json.dumps({"type": "leave_lobby"}))
+                else:
+                    self.net_out.put(json.dumps({
+                        "type": "create_lobby",
+                        "owner": self.client_id_hash
+                    }))
+                self.lobby_input_epoch = now
+
+            elif inputManager.get_action("back", keys):
+                self.mode = "menu-init"
+
+            # !! Gatekeep any further actions if in a lobby !!
+            elif self.lobby_id is not None:
+                return # <-- exit early
+
             if inputManager.get_action("up", keys):
                 self.lobby_index = max(0, self.lobby_index - 1)
                 self.lobby_input_epoch = now
@@ -395,16 +429,13 @@ class ClientGame:
                 self.lobby_input_epoch = now
 
             elif inputManager.get_action("select", keys):
-                lobby_id = self.lobbies[self.lobby_index]["id"]
-                self.net_out.put(json.dumps({"type": "join_lobby", "id": lobby_id}))
+                if not self.lobby_id:
+                    lobby_id = self.lobbies[self.lobby_index]["id"]
+                    self.net_out.put(json.dumps({
+                        "type": "join_lobby",
+                        "id": lobby_id
+                    }))
                 self.lobby_input_epoch = now
-
-            elif inputManager.get_action("create", keys):
-                self.net_out.put(json.dumps({"type": "create_lobby", "owner": self.client_id_hash}))
-                self.lobby_input_epoch = now
-
-            elif inputManager.get_action("back", keys):
-                self.mode = "menu-init"
 
         self.renderLobbyUI()
 
@@ -466,51 +497,7 @@ class ClientGame:
     # region OfflineGame
     def initTransToPlayOffline(self):
         self.transON_tick += 1
-        
-        # if self.transON_tick == 1:
-        #     self.entitiesAllDelete()
-
-        # # Set intervals for spawning and etc
-        # CELLS_PER_FRAME = 28
-
-        # if self.transON_tick % CELLS_PER_FRAME/2 == 0:
-        #     self.sfx_interval += 1
-        #     # soundManager.play(f"fastinvader{(self.sfx_interval % 3) + 1}",.25)
-
-
-        # # Spawn cells
-        # for _ in range(CELLS_PER_FRAME):
-
-        #     if self.spawn_r > 32:
-        #         break  # stop spawning, move to deletion phase
-
-        #     entity = sprites.Cell().summon(
-        #         target_row=self.spawn_r,
-        #         target_col=self.spawn_c,
-        #         screen=self.screen
-        #     )
-        #     self.entities["ui"].append(entity)
-
-        #     self.spawn_c += 1
-        #     if self.spawn_c >= 28:
-        #         self.spawn_c = 0
-        #         self.spawn_r += 1
-
-        # # Deletion phase (only runs after spawning is finished)
-        # if self.spawn_r > 32:
-
-        #     # Delete up to CELLS_PER_FRAME items safely
-        #     for _ in range(CELLS_PER_FRAME):
-        #         if not self.entities["ui"]:
-
-        #             # ON COMPLETON
-        #             # soundManager.stop_music()
-        #             self.transition_frame_count = 0
-        #             self.mode = "online-game"
-        #             self.spawn_c = 0
-        #             self.spawn_r = 0
-        #             return # just escapes the function
-        #         del self.entities["ui"][0]
+     
 
     # ========================================================
     # Lost Connection
@@ -659,11 +646,24 @@ class ClientGame:
         text = "``AVAILABLE LOBBIES``"
 
         for i, lobby in enumerate(self.lobbies):
-            prefix = "#> " if i == self.lobby_index else "&  "
+            prefix = "#> " if i == self.lobby_index and not self.lobby_id else "&  "
             text += f"{prefix}{lobby['name']} ({lobby['players']}/{lobby['max_players']})``"
 
-        text += "````&@C& CREATE LOBBY``&@ESC& BACK``"
+        # Bottom UI
+        if self.lobby_id:
+            text += (
+                "````"
+                "&@L& LEAVE LOBBY``"
+                f"&({self.lobby_name})``"
+            )
+        else:
+            text += "````&@C& CREATE LOBBY``"
+
+
+        text += "&@ESC& BACK``"
+
         self.entities["ui"] = render_text(text)
+
 
 
 # Entry
