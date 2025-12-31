@@ -1,9 +1,9 @@
-from pathlib import Path
+from resource import resource_path
 from sprites import Sprite
 import numpy as np
 from config import config
 
-sprites_dir = Path("sprites") / "font"
+sprites_dir = resource_path("sprites") / "font"
 
 # Translation table for special characters and digits to class names
 TRANSLATION_TABLE = {
@@ -16,6 +16,7 @@ TRANSLATION_TABLE = {
     ">": "Great",
     "?": "Question",
     ".": "Fullstop",
+    "/": "Slashfwd",
     # Digits
     "0": "Zero",
     "1": "One",

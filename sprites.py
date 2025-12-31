@@ -1,11 +1,11 @@
 import pygame, time, random
 from random import randint
-from pathlib import Path
+from resource import resource_path
 from render import loadSprite, scaleSprite, grid_to_pixel, recolourSprite, pixel_to_grid
 from config import config
 
 # Directories
-sprites_dir = Path("sprites")
+sprites_dir = resource_path("sprites")
 enemies_dir = sprites_dir / "enemies"
 death_sprite = sprites_dir / "explode.png"
 

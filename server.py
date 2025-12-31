@@ -1,6 +1,7 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 import json
 import uuid
+import random
 
 app = FastAPI()
 
@@ -86,10 +87,14 @@ async def websocket_endpoint(ws: WebSocket):
             # CREATE LOBBY
             elif msg_type == "create_lobby":
                 lobby_id = str(uuid.uuid4())[:8]
+                lobby_random_name = ["PONG","BALL","PING","SPIN","GAME","PLAY","MISS","BEEP","DING","BUMP","WALL","NETS","EDGE","ZONE","DUEL","COOP","MODE","LEFT","DOWN","FAST","SLOW","HOST","JOIN","MENU","USER","SAVE","LOAD","NAME","HIGH","BEST"]
+                random.shuffle(lobby_random_name)
+                lobby_random_int = random.randint(1000,9999)
 
                 lobbies[lobby_id] = {
                     "id": lobby_id,
-                    "name": msg.get("name", "Lobby"),
+                    "owner": msg.get("owner", "Anon"),
+                    "name": msg.get("name", f"{lobby_random_name.pop()}-{lobby_random_int}"),
                     "players": [],
                     "max_players": 2,
                 }

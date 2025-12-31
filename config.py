@@ -44,6 +44,48 @@ class Config:
         if clock is not None:
             self.clock = clock
             return clock
+    
+    def calculate_scale_against_pc_resolution(self, desktop_res_x, desktop_res_y) -> int:
+        """
+        Calculate the next scale, wrapping back to 1 if it exceeds PC resolution.
+        Returns -1 to indicate fullscreen mode when at max scale.
+        """
+
+        # Find the maximum scale that fits within the PC resolution
+        max_scale_x = desktop_res_x // self.RES_X_INIT
+        max_scale_y = desktop_res_y // self.RES_Y_INIT
+        max_scale = min(max_scale_x, max_scale_y)
+
+        # Increment scale
+        next_scale = self.resolution_scale + 1
+        
+        # # If we're one away from max, go fullscreen
+        # if next_scale == max_scale:
+        #     return -1  # Signal for fullscreen
+        
+        # If we exceed max, wrap back to 1
+        if next_scale > max_scale:
+            return 1
+        
+        return next_scale
+
+    def calculate_best_fit_scale(self, desktop_res_x, desktop_res_y) -> int:
+        """
+        Calculate the best fit scale for the given desktop resolution.
+        Scales to approximately 50% of the available screen space.
+        """
+
+        # Find the maximum scale that fits within the PC resolution
+        max_scale_x = desktop_res_x // self.RES_X_INIT
+        max_scale_y = desktop_res_y // self.RES_Y_INIT
+        max_scale = min(max_scale_x, max_scale_y)
+        
+        # Use half of the maximum scale for middle-ground sizing
+        half_scale = max_scale // 2
+        
+        # Ensure we have at least scale of 1
+        return max(1, half_scale)
+
 
 # Singleton instance
 config = Config()
