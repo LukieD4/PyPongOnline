@@ -1,12 +1,13 @@
 import pygame
 from math import ceil as floor
+# from math import floor
 
 class Config:
     # PLEASE DO NOT TOUCH THE SCALE VALUE
     def __init__(self, scale=1, framerate=60):
 
         # consts
-        self.RES_X_INIT, self.RES_Y_INIT = 286, 175 #    x858, y525
+        self.RES_X_INIT, self.RES_Y_INIT = 280, 184 #  was x286, y175, but caused sprite cutoffs, and we needed a centre column #  original x858, y525
         self.RESOLUTION_SCALE_INIT = scale
         self.CELL_SIZE = 8   # ALWAYS 8
         self.MAX_COL, self.MAX_ROW = floor(self.RES_X_INIT / self.CELL_SIZE), floor(self.RES_Y_INIT / self.CELL_SIZE)

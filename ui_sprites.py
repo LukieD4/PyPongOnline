@@ -49,7 +49,7 @@ class UI(Sprite):
         self.text_array = self.clear()
         self.previous_text_array = self.text_array.copy()
         self.current_color = None  # Track current color state (RGB tuple or None)
-        self.justification = "center"  # left, right, center, full
+        self.justification = "centre"  # left, right, centre, full
     
     def clear(self):
         """Initialize or clear the text array to a MAX_COL*MAX_ROW grid of None values."""
@@ -89,7 +89,7 @@ class UI(Sprite):
         
         return instance
 
-    def changeText(self, row=None, text=None):
+    def changeText(self, row=None, text=None, skip_justify=False):
         """
         Render text to the text_array grid with automatic wrapping and formatting.
         
@@ -166,10 +166,12 @@ class UI(Sprite):
             
             i += 1
         
-        
-        # Apply justification to each row
-        for r in range(config.MAX_ROW):
-            self.text_array[r] = self.justify_row(self.text_array[r])
+
+        # After writing characters:
+        if not skip_justify:
+            for r in range(config.MAX_ROW):
+                self.text_array[r] = self.justify_row(self.text_array[r])
+
 
         # Store a copy for comparison/diffing if needed
         self.previous_text_array = self.text_array.copy()
@@ -178,7 +180,7 @@ class UI(Sprite):
     
 
     def set_justification(self, mode: str):
-        if mode in ("left", "right", "center", "full"):
+        if mode in ("left", "right", "centre", "full"):
             self.justification = mode
     
     def justify_row(self, row_data):
@@ -210,7 +212,7 @@ class UI(Sprite):
             return new_row
 
         # CENTER JUSTIFY
-        if self.justification == "center":
+        if self.justification == "centre":
             new_row = np.full(max_col, None)
             start = (max_col - count) // 2
             new_row[start:start + count] = glyphs
@@ -317,7 +319,7 @@ spritesUI = UI()
 # ===========================================================
 # PUBLIC API - Use these functions to render UI text
 
-def render_text(text: str) -> list:
+def render_text(text: str, justification: str | None = "centre") -> list:
     """
     Primary function to convert a text string into a list of positioned sprite instances.
     
@@ -330,7 +332,12 @@ def render_text(text: str) -> list:
     Example:
         entities["ui"] = render_text("#Hello World``&Next line")
     """
-    text_array = spritesUI.changeText(text=text)
+    # Set justification if provided
+    if justification is not None:
+        spritesUI.set_justification(justification)
+
+    # Change text in the singleton UI sprite
+    text_array = spritesUI.changeText(text=text, skip_justify=(justification is None))
     
     if text_array is None:
         return []

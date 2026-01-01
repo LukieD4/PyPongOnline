@@ -55,9 +55,11 @@ class ClientGame:
 
         # --- entities ---
         self.entities = {
+            "ai": [],
             "players": [],
             "balls": [],
             "ui": [],
+            "decor": [],
         }
 
         # initialise pygame
@@ -82,7 +84,7 @@ class ClientGame:
         self.menu_index = 0
         self.menu_items = ["SOLO", "ONLINE", "SCREEN", "QUIT"]
         self.menu_actions = {
-            "SOLO": self.action_initOnlineFromMainMenu,
+            "SOLO": self.action_initOfflineFromMainMenu,
             "ONLINE": self.action_initOnlineFromMainMenu,
             "SCREEN": self.action_screen,
             "QUIT": self.action_quit,
@@ -99,6 +101,11 @@ class ClientGame:
         self.trans_spawned_cols = 0
         self.trans_spawned_rows = 0
 
+        # Playing offline
+        self.playOFF_tick = 0
+        self.playOFF_countdown_epoch = 0
+        self.playOFF_draw_line = False
+
         # Networking
         self.net_connected = False
         self.net_wasConnected = False
@@ -112,7 +119,6 @@ class ClientGame:
         self.net_timeout = 60
         self.net_last_error = None
         self.net_lost_tick = 0
-
         # Retry throttling (prevents spam reconnects)
         self.net_last_epoch_attempt = 0
 
@@ -139,6 +145,10 @@ class ClientGame:
             "online-offline": self.updateOnlineOffline,
             "lobby": self.updateLobbyBrowser,
             "online-game": self.updateOnlineGame,
+
+            # offline
+            "offline-init": self.initTransToPlayOffline,
+            "offline-game": self.updateOfflineGame,
 
             # trans
             "transON-init": self.initTransToPlayOnline,
@@ -231,13 +241,17 @@ class ClientGame:
         self.mode = "online-connect"
         self.online_tick = 0
         self.start_network()
+    
+    def action_initOfflineFromMainMenu(self):
+        # switch mode
+        self.mode = "transOFF-init"
+        self.transOFF_tick = 0
 
     def action_screen(self):
         self.rescaleWindow()
     
     def action_quit(self):
         pygame.quit()
-        exit()
 
     # ========================================================
     # Main Menu
@@ -375,7 +389,7 @@ class ClientGame:
         while not self.net_in.empty():
             raw = self.net_in.get()
 
-            # Ignore non-JSON noise (+prevent a crash)
+            # Ignore non-JSON noise (+prevent crashes)
             if not raw or raw[0] != "{":
                 continue
 
@@ -416,9 +430,11 @@ class ClientGame:
             elif inputManager.get_action("back", keys):
                 self.mode = "menu-init"
 
+
             # !! Gatekeep any further actions if in a lobby !!
             elif self.lobby_id is not None:
                 return # <-- exit early
+            
 
             if inputManager.get_action("up", keys):
                 self.lobby_index = max(0, self.lobby_index - 1)
@@ -430,6 +446,10 @@ class ClientGame:
 
             elif inputManager.get_action("select", keys):
                 if not self.lobby_id:
+                    # Prevent an index in empty 'self.lobbies[]' crash
+                    if len(self.lobbies) == 0:
+                        return
+                    # Join a lobby
                     lobby_id = self.lobbies[self.lobby_index]["id"]
                     self.net_out.put(json.dumps({
                         "type": "join_lobby",
@@ -496,7 +516,84 @@ class ClientGame:
     # Offline Game
     # region OfflineGame
     def initTransToPlayOffline(self):
-        self.transON_tick += 1
+        self.transOFF_tick += 1
+
+        # First-frame cleanup
+        if self.transOFF_tick == 1:
+            self.entitiesAllDelete()
+
+        CELLS_PER_FRAME = 14
+        ui_entities = self.entities["ui"]
+
+        # Sound timing (every half batch)
+        if self.transOFF_tick % (CELLS_PER_FRAME // 2) == 0:
+            self.trans_sfx_interval += 1
+            # soundManager.play(...)
+
+        for _ in range(CELLS_PER_FRAME):
+
+            # Spawn phase
+            if self.trans_spawned_rows <= config.MAX_ROW:
+                ui_entities.append(
+                    sprites.Cell().summon(
+                        target_row=self.trans_spawned_rows,
+                        target_col=self.trans_spawned_cols,
+                        colour=(100, 100, 100),
+                        screen=self.screen
+                    )
+                )
+
+                # Advance grid position
+                self.trans_spawned_cols += 1
+                if self.trans_spawned_cols >= config.MAX_COL:
+                    self.trans_spawned_cols = 0
+                    self.trans_spawned_rows += 1
+                continue  # do not delete on the same iteration
+
+            # Delete phase
+            if not ui_entities:
+                # Transition complete
+                self.transition_frame_count = 0
+                self.mode = "offline-game"
+                self.trans_spawned_cols = 0
+                self.trans_spawned_rows = 0
+                return
+
+            ui_entities.pop(0)
+
+    
+    def updateOfflineGame(self):
+        # UPDATE LOGIC: 60FPS
+        self.playOFF_tick += 1
+
+        # Setup on first frame
+        if self.playOFF_tick == 1:
+            self.playOFF_draw_line = True
+            self.entities["balls"].append(sprites.Ball().summon(
+                screen=self.screen,
+                target_row=config.MAX_ROW // 2,
+                target_col=config.MAX_COL // 2,
+            ))
+        
+        # Update ball
+        for ball in self.entities["balls"]:
+            ball.ticker()
+            ball.task()
+        
+        # Draw dashed centre line 6 times a second
+        if self.playOFF_tick % 10 == 0 and self.playOFF_draw_line:
+            center_col = (config.MAX_COL // 2)
+
+            for dash in range(config.RES_Y_INIT // 8):
+                self.entities["decor"].append(sprites.Dashline().summon(screen=self.screen, target_col=center_col, target_row=dash))
+
+
+        # testing ui
+        # ui = render_text("0   0", justification=None)
+        ui = render_text("0   0")
+        
+        self.entities["ui"] = ui
+
      
 
     # ========================================================
@@ -566,7 +663,12 @@ class ClientGame:
             ):
                 self.mode = "lost-init"
 
-            self.update_methods[self.mode]()
+
+            # Mode dispatch
+            try:
+                self.update_methods[self.mode]()
+            except KeyError:
+                print("⚠️ Warning: No update method implemented for mode:", self.mode)
 
             self.screen.fill((0, 0, 0))
             for entity in self.entitiesAllReturn():
@@ -646,7 +748,14 @@ class ClientGame:
         text = "``AVAILABLE LOBBIES``"
 
         for i, lobby in enumerate(self.lobbies):
-            prefix = "#> " if i == self.lobby_index and not self.lobby_id else "&  "
+
+            # Highlight current lobby
+            is_current = lobby["id"] == self.lobby_id
+            if is_current:
+                prefix = "@(YOU) "
+            else:
+                # else, highlight selection if not in a lobby
+                prefix = "#> " if i == self.lobby_index and not self.lobby_id else "&  "
             text += f"{prefix}{lobby['name']} ({lobby['players']}/{lobby['max_players']})``"
 
         # Bottom UI

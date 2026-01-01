@@ -6,8 +6,8 @@ from config import config
 
 # Directories
 sprites_dir = resource_path("sprites")
-enemies_dir = sprites_dir / "enemies"
-death_sprite = sprites_dir / "explode.png"
+ball_dir = sprites_dir / "ball"
+paddle_dir = sprites_dir / "paddle"
 
 
 class Sprite:
@@ -361,7 +361,11 @@ class Sprite:
 
 
 
-
+#region Dashline
+class Dashline(Sprite):
+    def __init__(self):
+        super().__init__()
+        self.spritesheet = [[sprites_dir / "dashline.png"]]
 
 #region Cell
 class Cell(Sprite):
@@ -387,6 +391,17 @@ class Logo(Sprite):
 class Player(Sprite):
     def __init__(self):
         super().__init__()
+        self.spritesheet = [[paddle_dir / "left.png",
+                             paddle_dir / "top.png",
+                             paddle_dir / "right.png",
+                             paddle_dir / "bottom.png"]]
+        self.speed = 5
+
+
+#region CPUPlayer
+class CPUPlayer(Sprite):
+    def __init__(self):
+        super().__init__()
         self.spritesheet = [[]]
         self.speed = 5
 
@@ -394,8 +409,28 @@ class Player(Sprite):
 class Ball(Sprite):
     def __init__(self):
         super().__init__()
-        self.spritesheet = [[]]
+        self.spritesheet = [[ball_dir / "0.png",
+                             ball_dir / "1.png",
+                             ball_dir / "2.png",
+                             ball_dir / "3.png",]]
         self.speed = -5
+        self.velocity_x = 0
+        self.velocity_y = 0
 
     def task(self):
+        # move per task
+        self.move_position(dx=self.velocity_x, dy=self.velocity_y)
+
+        # oscillate sprite every 5 ticks
+        if self.tick % 5 != 0: return
+        self.oscillate_sprite()
+
+        # apply random motion for testing
+        if self.tick % 10 != 0: return
+        self.set_velocity()
         pass
+
+    def set_velocity(self, vel_x=None, vel_y=None):
+        self.velocity_x = randint(-2,2)
+        self.velocity_y = randint(-2,2)
+        
