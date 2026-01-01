@@ -6,8 +6,8 @@ PyPongOnline is a Python-oriented Pong clone featuring:
 
 ## Networking
 - Connects to https://render.com/.
-- Creates a Web Socket Server players can connect to.
-- The online service is dormant, and requires cold booting if inactive for too long.
+- Creates a Web Socket Server which players can connect to.
+- The online service is dormant, and requires cold booting if inactive for too long (15 mins).
 > The service will remain alive as long as render.com is still operational (01/01/2026), and their (hobbyist) free-tier hasn't changed.
 
 ## Solo / CPU (AI)
