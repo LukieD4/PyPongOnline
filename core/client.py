@@ -1,15 +1,34 @@
-import pygame, os, time, asyncio, websockets, queue, threading, json
+from __future__ import annotations
+
+import pygame, os, time, asyncio, websockets, queue, threading, json, sys
+import sprites
 from config import config
 from socket import gethostname
 from hashlib import sha256
 from resource import resource_path
 from input import inputManager
-import sprites
 from ui_sprites import render_text, clear_ui
+
+
+
+
+
 
 debug = False
 gamesettings_filename = "game_settings.txt" # don't use resource_path for user settings
 os.environ['SDL_VIDEO_CENTERED'] = '1'
+
+def running_as_exe():
+    # Nuitka sets __compiled__ = True
+    if "__compiled__" in globals():
+        return True
+
+    # PyInstaller sets sys.frozen = True
+    if getattr(sys, "frozen", False):
+        return True
+
+    return False
+
 
 def set_always_on_top():
     """Set the Pygame window to always stay on top (Windows only)"""
@@ -105,6 +124,7 @@ class ClientGame:
         self.playOFF_tick = 0
         self.playOFF_countdown_epoch = 0
         self.playOFF_draw_line = False
+        self.playOFF_drawn_lines = 0
 
         # Networking
         self.net_connected = False
@@ -138,6 +158,7 @@ class ClientGame:
             # menus
             "menu-init": self.initMainMenu,
             "menu": self.updateMainMenu,
+            # "menu": self.updateOfflineGame, # comment out later
 
             # online
             "online-connect": self.updateOnlineConnect,
@@ -565,6 +586,7 @@ class ClientGame:
     def updateOfflineGame(self):
         # UPDATE LOGIC: 60FPS
         self.playOFF_tick += 1
+        keys = pygame.key.get_pressed()
 
         # Setup on first frame
         if self.playOFF_tick == 1:
@@ -574,23 +596,89 @@ class ClientGame:
                 target_row=config.MAX_ROW // 2,
                 target_col=config.MAX_COL // 2,
             ))
-        
-        # Update ball
-        for ball in self.entities["balls"]:
-            ball.ticker()
-            ball.task()
-        
-        # Draw dashed centre line 6 times a second
-        if self.playOFF_tick % 10 == 0 and self.playOFF_draw_line:
-            center_col = (config.MAX_COL // 2)
+            self.entities["players"].append(sprites.Player().summon(
+                screen=self.screen,
+                target_row=(config.MAX_ROW // 2),
+                target_col=2))
+            self.entities["ai"].append(sprites.CPUPlayer().summon(
+                screen=self.screen,
+                target_row=(config.MAX_ROW // 2),
+                target_col=config.MAX_COL-2))
 
-            for dash in range(config.RES_Y_INIT // 8):
-                self.entities["decor"].append(sprites.Dashline().summon(screen=self.screen, target_col=center_col, target_row=dash))
+        # Tick all entities
+        for entity in self.entitiesAllReturn():
+            entity.ticker()
+
+        # Draw one dash 12 times a second
+        if self.playOFF_tick % 5 == 0 and self.playOFF_draw_line:
+            center_col = config.MAX_COL // 2
+            # spawn a single dash at the next row
+            dash_row = self.playOFF_drawn_lines % (config.RES_Y_INIT // 8)
+            self.entities["decor"].append(
+                sprites.Dashline().summon(
+                    screen=self.screen,
+                    target_col=center_col,
+                    target_row=dash_row
+                )
+            )
+            if self.playOFF_drawn_lines >= 22:
+                self.playOFF_draw_line = False
+            
+            self.playOFF_drawn_lines += 1
+
+            
+        # --- Game only starts once line has been drawn. ---
+        if self.playOFF_draw_line:
+            return
+        # --- --- --- --- --- ---
+        
+        entity60: sprites.Sprite
+
+        # Update the player
+        for entity60 in self.entities["players"]:
+            entity60.task(keys)
+        
+        # Update the balls, ai
+        for entity60 in self.entities["balls"]+self.entities["ai"]:
+            entity60.task()
+
+        
+        # Check collisions
+        ball: sprites.Ball
+        player: sprites.Player
+        for ball in self.entities["balls"]:
+            # -- Ball v. Player
+            for player in self.entities["players"]+self.entities["ai"]:
+                if self.check_collision(ball.sprite_rect, player.sprite_rect):
+
+                    # Successful hit, but check owner to prevent multiple hit registrations
+                    if not ball.owner or ball.owner != player:
+                        print(ball.owner, "hit by", player)
+                        ball.owner = player
+                        ball.set_velocity_basedOnPlayerMotion(player)
+        
+        # Check screen edge for ball redirect
+        for ball in self.entities["balls"]:
+            # if ball.sprite_rect.left <= 0 or ball.sprite_rect.right >= config.res_x:
+            #     ball.set_velocity(-ball.velocity_x, ball.velocity_y)
+            if ball.sprite_rect.top <= 0 or ball.sprite_rect.bottom >= config.res_y:
+                ball.set_velocity(ball.velocity_x, -ball.velocity_y)
+
+        
+        # -- debug, return ball back
+        if keys[pygame.K_f]:
+            print("DEBUG: resetting ball position")
+            for ball in self.entities["balls"]:
+                ball.current_speed = ball.base_speed
+                ball.owner = None
+                ball.set_velocity(-1,0)
+                ball.move_position(dcol=config.MAX_COL // 3, drow=config.MAX_ROW // 2, set_position=True)
+        
 
 
         # testing ui
-        # ui = render_text("0   0", justification=None)
-        ui = render_text("0   0")
+        ui = render_text("¬¬¬   0   0`````````````````````(P1) Lukie¬¬¬   Lukie (P2)", justification=None)
+        # ui = render_text("0   0`A`A`A`A`A`A`A`A`A`A`A`A`A`A")
         
         self.entities["ui"] = ui
 
@@ -712,6 +800,15 @@ class ClientGame:
         self.entities = {k: [] for k in self.entities}
         return self.entities
     
+    # -- Collision Detection
+    def check_collision(self, rect_a, rect_b):
+        """Return True if two rects collide."""
+        if not rect_a or not rect_b:
+            return False
+
+        collided = rect_a.colliderect(rect_b)
+        return collided
+    
     # -- File game setting
     def saveGameSettings(self, override_scale=None):
         scale = override_scale if override_scale is not None else config.resolution_scale
@@ -777,4 +874,14 @@ class ClientGame:
 
 # Entry
 if __name__ == "__main__":
+
+    # increase build version
+    if not running_as_exe():
+        with open("buildver.txt", "r+") as f:
+            new = int(f.read() or 0) + 1
+            f.seek(0), f.write(str(new)), f.truncate()
+
+
+
+    # run the main game
     ClientGame().main()

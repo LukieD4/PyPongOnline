@@ -1,6 +1,7 @@
 from resource import resource_path
 from sprites import Sprite
-import numpy as np
+import numpyStub as np
+from numpyStub import copy as np_copy
 from config import config
 
 sprites_dir = resource_path("sprites") / "font"
@@ -47,7 +48,7 @@ class UI(Sprite):
     def __init__(self):
         super().__init__()
         self.text_array = self.clear()
-        self.previous_text_array = self.text_array.copy()
+        self.previous_text_array = np_copy(self.text_array)
         self.current_color = None  # Track current color state (RGB tuple or None)
         self.justification = "centre"  # left, right, centre, full
     
@@ -174,7 +175,7 @@ class UI(Sprite):
 
 
         # Store a copy for comparison/diffing if needed
-        self.previous_text_array = self.text_array.copy()
+        self.previous_text_array = np_copy(self.text_array)
         return self.text_array
 
     
@@ -257,9 +258,7 @@ class UI(Sprite):
                             new_row.append(None)
                         gap_index += 1
 
-            return np.array(new_row[:max_col])
-
-
+            return np.asarray(new_row[:max_col])
 
 
 def make_class_name(filename: str) -> str:

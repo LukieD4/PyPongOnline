@@ -3,6 +3,7 @@ from random import randint
 from resource import resource_path
 from render import loadSprite, scaleSprite, grid_to_pixel, recolourSprite, pixel_to_grid
 from config import config
+from input import inputManager
 
 # Directories
 sprites_dir = resource_path("sprites")
@@ -300,26 +301,26 @@ class Sprite:
             self.sprite_rect.size = self.surface_render.get_size()
 
     #region Positioning
-    def move_position(self, dx=0, dy=0, drow=0, dcol=0, use_direction_multiplier=False):
+    def move_position(self, dx=0, dy=0, drow=0, dcol=0, set_position=False):
 
         # Convert row/col movement to pixel movement (unscaled)
         cell = config.CELL_SIZE
         if drow or dcol:
             dx, dy = dcol * cell, drow * cell
 
-        # Apply sprite direction multiplier (still world units)
-        if use_direction_multiplier:
-            dx *= self.sprite_direction[0]
-            dy *= self.sprite_direction[1]
-
-        # SCALE MOVEMENT TO MATCH RENDER SCALE :sob:
+        # SCALE MOVEMENT TO MATCH RENDER SCALE
         scale = config.resolution_scale
         dx *= scale
         dy *= scale
 
-        # Apply position
-        self.pos_x += dx
-        self.pos_y += dy
+        if set_position:
+            # DIRECTLY SET POSITION
+            self.pos_x = dx
+            self.pos_y = dy
+        else:
+            # APPLY MOVEMENT
+            self.pos_x += dx
+            self.pos_y += dy
 
         # Update grid coords
         grid = pixel_to_grid(x=self.pos_x, y=self.pos_y)
@@ -327,6 +328,7 @@ class Sprite:
 
         if self.sprite_rect:
             self.sprite_rect.topleft = (self.pos_x, self.pos_y)
+
 
 
     
@@ -339,7 +341,7 @@ class Sprite:
             case _:
                 if self.tick % 10+randint(-3,3) == 0:
                     self.oscillate_sprite()
-                    self.move_position(dx=self._demo_x,dy=0,use_direction_multiplier=False)
+                    self.move_position(dx=self._demo_x,dy=0)
     
     def task_queryIsOutOfBounds(self):
         grid_coords = pixel_to_grid(self.pos_x,self.pos_y)
@@ -387,50 +389,145 @@ class Logo(Sprite):
         super().__init__()
         self.spritesheet = [[sprites_dir / "logo0.png"]]
 
-#region Player
-class Player(Sprite):
+
+
+
+
+
+
+#region Dummy
+class Dummy(Sprite):
     def __init__(self):
-        super().__init__()
+        super().__init__()  
         self.spritesheet = [[paddle_dir / "left.png",
                              paddle_dir / "top.png",
                              paddle_dir / "right.png",
                              paddle_dir / "bottom.png"]]
-        self.speed = 5
+        self.pos_y_prev = 0
+        self.pos_motion_mult = 0
+        self.pos_desync_calc = 0
+
+#region Player
+class Player(Dummy):
+    def __init__(self):
+        super().__init__()        
+
+        self.speed = 2
+
+        # Define movement orientation, future case to if we want Players on different sides of the screen
+        self.movement_orientation = {"forward": "up", "backward": "down"}
+    
+    def task(self, keys=None):
+
+        # Check keys if provided
+        if keys is None: return
+
+        has_inputted = False
+        applied_speed = self.speed
+        is_y_upOOB = not (self.pos_y-applied_speed > 0)
+        is_y_downOOB = not ((self.pos_y+applied_speed) < config.res_y-(config.CELL_SIZE*config.resolution_scale))
+
+        if inputManager.get_action(self.movement_orientation["forward"], keys) and not is_y_upOOB:
+            has_inputted = True
+            self.move_position(dy=-applied_speed)
+        if inputManager.get_action(self.movement_orientation["backward"], keys) and not is_y_downOOB:
+            has_inputted = True
+            self.move_position(dy=applied_speed)
+        
+        # Check the pixels the player has moved since last x frames, but skip if player has moved
+        if self.tick % 30 == 0 and not has_inputted:
+            self.pos_y_prev = self.pos_y
+            # print(f"movement delta: {delta_y}")
+        
+        if self.tick % 120 == 0:
+            # self.o
+            pass
+        
 
 
 #region CPUPlayer
-class CPUPlayer(Sprite):
+class CPUPlayer(Dummy):
     def __init__(self):
         super().__init__()
-        self.spritesheet = [[]]
-        self.speed = 5
+        self.speed = 8
+    
+    def task(self):
+        if (self.pos_y+self.speed < 0) or (self.pos_y+self.speed > config.res_y):
+            self.speed *= -1
+
+        self.set_sprite(0,2,recolour=(255,255,255))
+        
+        self.move_position(0,self.speed)
 
 #region Ball
 class Ball(Sprite):
     def __init__(self):
         super().__init__()
-        self.spritesheet = [[ball_dir / "0.png",
-                             ball_dir / "1.png",
-                             ball_dir / "2.png",
-                             ball_dir / "3.png",]]
-        self.speed = -5
-        self.velocity_x = 0
+        self.spritesheet = [[
+            ball_dir / "0.png",
+            ball_dir / "1.png",
+            ball_dir / "2.png",
+            ball_dir / "3.png",
+        ]]
+
+        # Initial velocity
+        self.velocity_x = -1
         self.velocity_y = 0
 
-    def task(self):
-        # move per task
+        # Speed control
+        self.base_speed = 1.0
+        self.current_speed = self.base_speed
+        self.max_speed = 4.0
+        self.speed_increment = 0.15
+
+        # Owner tracking
+        self.owner = None  # which player last hit the ball
+
+    def task(self) -> None:
+        # --- movement ---
+        # print(self.velocity_x, self.velocity_y)
         self.move_position(dx=self.velocity_x, dy=self.velocity_y)
 
-        # oscillate sprite every 5 ticks
-        if self.tick % 5 != 0: return
-        self.oscillate_sprite()
+        # --- animation ---
+        if self.tick % 5 == 0:
+            self.oscillate_sprite()
 
-        # apply random motion for testing
-        if self.tick % 10 != 0: return
-        self.set_velocity()
-        pass
+        # (optional) debug
+        # print(self.velocity_x, self.velocity_y)
 
-    def set_velocity(self, vel_x=None, vel_y=None):
-        self.velocity_x = randint(-2,2)
-        self.velocity_y = randint(-2,2)
+    def set_velocity_basedOnPlayerMotion(self, player: Player):
+        # influence
+        max_influence = 1
+        delta = player.pos_y - player.pos_y_prev
+        delta = max(-max_influence, min(max_influence, delta))
+
+        # reverse X, add Y influence
+        new_x = -self.velocity_x
+        new_y = self.velocity_y + delta
+
+        # increase speed slightly
+        self.current_speed = min(self.current_speed + self.speed_increment, self.max_speed)
+
+        return self.set_velocity(new_x, new_y)
+
+
+
+    def set_velocity(self, velocity_x=None, velocity_y=None):
+        if velocity_x is not None:
+            self.velocity_x = velocity_x
+
+        if velocity_y is not None:
+            self.velocity_y = velocity_y
+
+        # --- NORMALISE VECTOR ---
+        mag = (self.velocity_x**2 + self.velocity_y**2) ** 0.5
+        if mag != 0:
+            # scale to current_speed
+            scale = self.current_speed / mag
+            self.velocity_x *= scale
+            self.velocity_y *= scale
+
+        return self.velocity_x, self.velocity_y
+
+
         

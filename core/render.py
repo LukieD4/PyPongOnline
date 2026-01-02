@@ -1,7 +1,7 @@
 # render.py
 import pygame
 import math
-from pathlib import Path
+from resource import resource_path
 from config import config
 
 def recolourSprite(surface: pygame.Surface, new_colour, preserve_alpha=True):
@@ -31,7 +31,7 @@ def loadSprite(spritesheet, pos=(-100, -100)):
         image = pygame.image.load(path).convert_alpha()
     except Exception as e:
         print(f"[loadSprite] Failed to load {spritesheet[0]}: {e}")
-        fallback = Path("sprites/missing.png")
+        fallback = resource_path("sprites/missing.png")
         image = pygame.image.load(str(fallback)).convert_alpha()
     return image
 

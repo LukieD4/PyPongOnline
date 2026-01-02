@@ -47,5 +47,16 @@ INPUT_MODES = {
     },
     "online-offline": {
         "back": InputManager.universal_back()
+    },
+
+    # IN-GAME CONTROLS
+    "offline-game": {
+        "up": ["K_UP", "K_w"],
+        "down": ["K_DOWN", "K_s"],
+        "left": ["K_a"],
+        "right": ["K_d"],
+        "pause": ["K_p"],
+        "sprint": ["K_LSHIFT", "K_RSHIFT"],
+        "back": InputManager.universal_back(),
     }
 }
