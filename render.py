@@ -1,6 +1,6 @@
-# render.py
 import pygame
 import math
+
 from resource import resource_path
 from config import config
 

@@ -1,5 +1,7 @@
 import sys
+
 from pathlib import Path
+
 
 def resource_path(relative: str) -> Path:
     """

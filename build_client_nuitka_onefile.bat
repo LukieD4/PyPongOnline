@@ -5,7 +5,7 @@ REM ==================================================
 REM PROJECT CONFIG
 REM ==================================================
 set PROJECT_NAME=PyPongOnline
-set ENTRY_POINT=core\client.py
+set ENTRY_POINT=client.py
 set ICON_PATH=sprites\program.ico
 set SRCDIR=%~dp0
 set DISTDIR=dist

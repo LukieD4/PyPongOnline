@@ -1,7 +1,9 @@
 import pygame, time, random
+
 from random import randint
+
 from resource import resource_path
-from render import loadSprite, scaleSprite, grid_to_pixel, recolourSprite, pixel_to_grid
+from render import loadSprite, scaleSprite, grid_to_pixel, pixel_to_grid
 from config import config
 from input import inputManager
 
@@ -17,11 +19,12 @@ class Sprite:
         # (Float) Pixel coords
         self.pos_x, self.pos_y = 0, 0
         self.pos_row, self.pos_col = int(0), int(0)
+        # (Float) (consts)
         self.POS_X_OFFSET, self.POS_Y_OFFSET = 0, 0
         self.POS_X_PREV, self.POS_Y_PREV = 0, 0
         
         # (Ideal: Integer) (const) 
-        self.SCALE = 1
+        self.__SCALE = 1
 
         # (Integer) How many updates this sprite has recieved
         self.tick = 0
@@ -29,10 +32,12 @@ class Sprite:
         # sprite resources
         self.spritesheet = []
         self.sprite_rect: pygame.Rect | None = None
-        self._oscillator = 0
+        self.sprite_index = 0
+        # don't tamper
+        self._sprite_oscillator = 0
 
         # team
-        self.team = None
+        self.team = "decor" # (default: a vegatative state)
 
         # mark
         self.mark_for_deletion = False
@@ -46,7 +51,7 @@ class Sprite:
         self.surface_render: pygame.Surface | None = None
         self.surface_tint_color: tuple[int,int,int] | None = None
 
-        assert self.SCALE >= 0.25, "resolution_scale must be greater than 0.25"
+        assert self.__SCALE >= 0.25, "resolution_scale must be greater than 0.25"
 
     #region Surfacing
     def _tint_surface(self, surface: pygame.Surface, colour: tuple[int,int,int]) -> pygame.Surface:
@@ -63,13 +68,13 @@ class Sprite:
         return tinted
 
     def _build_render_surface(self, source_surface: pygame.Surface) -> pygame.Surface:
-        """Scale `source_surface` according to the global config and per-sprite `self.SCALE`.
+        """Scale `source_surface` according to the global config and per-sprite `self.__SCALE`.
         Returns a new Surface suitable for blitting.
         """
         if source_surface is None:
             return None
-        final_factor = config.resolution_scale * self.SCALE
-        # print(final_factor, config.resolution_scale, self.SCALE)
+        final_factor = config.resolution_scale * self.__SCALE
+        # print(final_factor, config.resolution_scale, self.__SCALE)
         if final_factor > 1024:
             pass
         return scaleSprite(self, source_surface, factor=final_factor, smooth=False)
@@ -120,10 +125,11 @@ class Sprite:
         screen=None,
         colour: tuple[int, int, int] = None,
         offset_x=None,
-        offset_y=None
+        offset_y=None,
+        initial_sprite_index=None  # NEW PARAMETER
     ):
         """
-        Spawn sprite using spritesheet[0][0] as initial frame.
+        Spawn sprite using spritesheet[anim_index][initial_sprite_index] as initial frame.
         Ensure we use the same loading path as set_sprite so tint and surface_original are consistent.
         """
 
@@ -156,14 +162,19 @@ class Sprite:
         # If a colour was passed, stash it (so future animations/rescales reuse it)
         if colour is not None:
             self.surface_tint_color = tuple(colour)
+        
+        # Fallback to sprite's index if none
+        if initial_sprite_index is None:
+            initial_sprite_index = self.sprite_index
 
         # Use set_sprite to load frame and apply tint/scaling logic consistently
+        # NOW RESPECTS THE initial_sprite_index PARAMETER
         try:
-            self.set_sprite(0, 0, recolour=self.surface_tint_color)
+            self.set_sprite(0, initial_sprite_index, recolour=self.surface_tint_color)
         except Exception:
             # fallback if spritesheet not available
             if self.spritesheet and self.spritesheet[0]:
-                raw = loadSprite([self.spritesheet[0][0]])
+                raw = loadSprite([self.spritesheet[0][initial_sprite_index]])
                 self.surface_original = raw.convert_alpha()
                 if self.surface_tint_color is not None:
                     self.surface_tinted_original = self._tint_surface(self.surface_original, self.surface_tint_color)
@@ -236,14 +247,7 @@ class Sprite:
 
         screen.blit(self.surface_render, (self.pos_x, self.pos_y))
 
-    #region Spritesheet
-    def set_spritesheet(self, new_spritesheet):
-        self.spritesheet = new_spritesheet
-        # reset oscillator and surfaces
-        self._oscillator = 0
-        # reload initial frame using set_sprite to keep tint behaviour consistent
-        self.set_sprite(0, 0, recolour=self.surface_tint_color)
-    
+
     def set_sprite(self, anim_index: int, frame_index: int, recolour: tuple[int,int,int] | None = None):
         """
         Load frame from disk into surface_original, optionally recolour it and cache the tinted original.
@@ -271,6 +275,41 @@ class Sprite:
         if self.sprite_rect and self.surface_render:
             self.sprite_rect.size = self.surface_render.get_size()
 
+    #region Spritesheet
+    def replace_spritesheet(self, new_spritesheet):
+        self.spritesheet = new_spritesheet
+        # reset oscillator and surfaces
+        self._sprite_oscillator = 0
+        # reload initial frame using set_sprite to keep tint behaviour consistent
+        self.set_sprite(0, 0, recolour=self.surface_tint_color)
+    
+    # def set_sprite(self, anim_index: int, frame_index: int, recolour: tuple[int,int,int] | None = None):
+    #     """
+    #     Load frame from disk into surface_original, optionally recolour it and cache the tinted original.
+    #     Then scale and set surface_render (the one surface used for drawing).
+    #     """
+    #     # Update tint color if recolour explicitly provided
+    #     if recolour is not None:
+    #         self.surface_tint_color = tuple(recolour)
+
+    #     # Load raw frame
+    #     raw = loadSprite([self.spritesheet[anim_index][frame_index]])
+    #     self.surface_original = raw.convert_alpha()
+
+    #     # If a tint colour exists, produce a tinted original; else clear it
+    #     if self.surface_tint_color is not None:
+    #         self.surface_tinted_original = self._tint_surface(self.surface_original, self.surface_tint_color)
+    #         source = self.surface_tinted_original
+    #     else:
+    #         self.surface_tinted_original = None
+    #         source = self.surface_original
+
+    #     # Scale to current global * per-sprite scale
+    #     self.surface_render = self._build_render_surface(source)
+
+    #     if self.sprite_rect and self.surface_render:
+    #         self.sprite_rect.size = self.surface_render.get_size()
+
     def oscillate_sprite(self, oscillator_override: int | None = None):
         """
         Swap animation frame but keep tint if present.
@@ -278,12 +317,12 @@ class Sprite:
         assert len(self.spritesheet[0]) > 0, "[oscillate_sprite] No frames available in spritesheet!"
 
         if oscillator_override is not None:
-            self._oscillator = oscillator_override % len(self.spritesheet[0])
+            self._sprite_oscillator = oscillator_override % len(self.spritesheet[0])
         else:
-            self._oscillator = (self._oscillator + 1) % len(self.spritesheet[0])
+            self._sprite_oscillator = (self._sprite_oscillator + 1) % len(self.spritesheet[0])
 
         anim_index = 0
-        frame_index = self._oscillator
+        frame_index = self._sprite_oscillator
         # Load new base frame and apply current tint (if any)
         raw = loadSprite([self.spritesheet[anim_index][frame_index]])
         self.surface_original = raw.convert_alpha()
@@ -308,7 +347,7 @@ class Sprite:
         if drow or dcol:
             dx, dy = dcol * cell, drow * cell
 
-        # SCALE MOVEMENT TO MATCH RENDER SCALE
+        # __SCALE MOVEMENT TO MATCH RENDER __SCALE
         scale = config.resolution_scale
         dx *= scale
         dy *= scale
@@ -355,6 +394,7 @@ class Sprite:
 
 
 
+
 #region -> SPRITES
 
 
@@ -373,7 +413,6 @@ class Dashline(Sprite):
 class Cell(Sprite):
     def __init__(self):
         super().__init__()
-        self.team = "barriers"
         self.spritesheet = [[sprites_dir / "cell.png"]]
 
 
@@ -410,7 +449,8 @@ class Dummy(Sprite):
 #region Player
 class Player(Dummy):
     def __init__(self):
-        super().__init__()        
+        super().__init__()
+        self.team = "players"
 
         self.speed = 2
 
@@ -449,20 +489,34 @@ class Player(Dummy):
 class CPUPlayer(Dummy):
     def __init__(self):
         super().__init__()
+        self.team = "ai"
         self.speed = 8
+        self.sprite_index = 2
+        
     
     def task(self):
         if (self.pos_y+self.speed < 0) or (self.pos_y+self.speed > config.res_y):
             self.speed *= -1
 
-        self.set_sprite(0,2,recolour=(255,255,255))
+        # self.set_sprite(0,2,recolour=(255,255,255))
+        # self.sprite_index = (self.sprite_index%4) + 1
+        if self.tick % 15 == 0:
+            self.set_sprite(0,0)
+        elif self.tick % 20 == 0:
+            self.set_sprite(0,1)
+        elif self.tick % 25 == 0:
+            self.set_sprite(0,2)
+        elif self.tick % 31 == 0:
+            self.set_sprite(0,3)
         
-        self.move_position(0,self.speed)
+        
+        # self.move_position(0,self.speed)
 
 #region Ball
 class Ball(Sprite):
     def __init__(self):
         super().__init__()
+        self.team = "balls"
         self.spritesheet = [[
             ball_dir / "0.png",
             ball_dir / "1.png",

@@ -1,16 +1,15 @@
-from __future__ import annotations
-
 import pygame, os, time, asyncio, websockets, queue, threading, json, sys
+
 import sprites
+from stager import Stager
+
 from config import config
-from socket import gethostname
-from hashlib import sha256
 from resource import resource_path
 from input import inputManager
-from ui_sprites import render_text, clear_ui
+from ui_sprites import render_text
 
-
-
+from socket import gethostname
+from hashlib import sha256
 
 
 
@@ -91,6 +90,9 @@ class ClientGame:
         self.clock = pygame.time.Clock()
         self.current_scale = config.resolution_scale
         self.frame_count = 0
+
+        # Set stage
+        self.stager = Stager(self.screen,self.entities)
 
         # --- user unique id ---
         self.client_id_hash = sha256(gethostname().encode()).hexdigest()
@@ -591,19 +593,23 @@ class ClientGame:
         # Setup on first frame
         if self.playOFF_tick == 1:
             self.playOFF_draw_line = True
-            self.entities["balls"].append(sprites.Ball().summon(
-                screen=self.screen,
-                target_row=config.MAX_ROW // 2,
-                target_col=config.MAX_COL // 2,
-            ))
-            self.entities["players"].append(sprites.Player().summon(
-                screen=self.screen,
-                target_row=(config.MAX_ROW // 2),
-                target_col=2))
-            self.entities["ai"].append(sprites.CPUPlayer().summon(
-                screen=self.screen,
-                target_row=(config.MAX_ROW // 2),
-                target_col=config.MAX_COL-2))
+
+            # Load stage, auto assigns
+            self.entities = self.entitiesAppend(self.stager.load_stage(resource_path("stages/classic.stage")))
+            
+            # self.entities["balls"].append(sprites.Ball().summon(
+            #     screen=self.screen,
+            #     target_row=config.MAX_ROW // 2,
+            #     target_col=config.MAX_COL // 2,
+            # ))
+            # self.entities["players"].append(sprites.Player().summon(
+            #     screen=self.screen,
+            #     target_row=(config.MAX_ROW // 2),
+            #     target_col=2))
+            # self.entities["ai"].append(sprites.CPUPlayer().summon(
+            #     screen=self.screen,
+            #     target_row=(config.MAX_ROW // 2),
+            #     target_col=config.MAX_COL-2))
 
         # Tick all entities
         for entity in self.entitiesAllReturn():
@@ -753,10 +759,7 @@ class ClientGame:
 
 
             # Mode dispatch
-            try:
-                self.update_methods[self.mode]()
-            except KeyError:
-                print("⚠️ Warning: No update method implemented for mode:", self.mode)
+            self.update_methods.get(self.mode, lambda: print(f"⚠️  Warning: No update method implemented for mode: {self.mode}"))()
 
             self.screen.fill((0, 0, 0))
             for entity in self.entitiesAllReturn():
@@ -792,6 +795,13 @@ class ClientGame:
 
         # save setting
         self.saveGameSettings()
+    
+    def entitiesAppend(self, new_entities):
+        combined_entities = self.entities
+        for team, items in new_entities.items():
+            combined_entities[team].extend(items)
+        return combined_entities
+
 
     def entitiesAllReturn(self):
         return [e for lst in self.entities.values() for e in lst]

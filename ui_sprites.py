@@ -1,6 +1,7 @@
+import numpyStub as np
+
 from resource import resource_path
 from sprites import Sprite
-import numpyStub as np
 from numpyStub import copy as np_copy
 from config import config
 
@@ -47,6 +48,7 @@ class UI(Sprite):
     
     def __init__(self):
         super().__init__()
+        self.team = "ui"
         self.text_array = self.clear()
         self.previous_text_array = np_copy(self.text_array)
         self.current_color = None  # Track current color state (RGB tuple or None)
@@ -367,17 +369,3 @@ def render_text(text: str, justification: str | None = "centre") -> list:
             spawned_sprites.append(spawned)
             
     return spawned_sprites
-
-
-def clear_ui() -> list:
-    """
-    Clear all UI text and return an empty list.
-    
-    Returns:
-        Empty list to assign to entities["ui"]
-        
-    Example:
-        entities["ui"] = clear_ui()
-    """
-    spritesUI.clear()
-    return []
