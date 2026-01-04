@@ -1,6 +1,8 @@
 import sprites
 from config import config
 
+TILE_BUFFER_OFFSET = 1
+
 class Stager:
     def __init__(self, screen, reference_entity_dict):
         self.screen = screen
@@ -57,14 +59,18 @@ class Stager:
         return self.entities
 
     def _spawn(self):
+        offset = ( TILE_BUFFER_OFFSET * -config.CELL_SIZE ) * config.resolution_scale
+
         for row_i, row in enumerate(self.grid):
             for col_i, cell in enumerate(row):
                 cls = self.entity_map.get(cell)
                 if not cls:
                     continue
 
-                pos_x = col_i * (config.CELL_SIZE * config.resolution_scale)
-                pos_y = row_i * (config.CELL_SIZE * config.resolution_scale)
+                
+                pos_x = (col_i * (config.CELL_SIZE * config.resolution_scale)) + offset
+                pos_y = (row_i * (config.CELL_SIZE * config.resolution_scale)) + offset
+
 
                 entity = cls()
                 entity.summon(

@@ -26,9 +26,9 @@ PyPongOnline is a Python-oriented Pong clone featuring:
 
 ## File size
 An unoptimised build takes us to around 50MB, and for a Pong Game it left a bad taste.
-- `build_client_nuitka_onefile.bat` impressive compression, instantanious loading times; BUT takes 5 minutes to compile.
+- `build_client_nuitka_onefile_lto.bat` impressive compression (i.e. 19,426,894 bytes), instantanious loading times; BUT takes 4 minutes to compile.
 > Struggled to embed `sprites/` and `stages/` inside of exe, so they are uploaded individually.
-- `build_client_pyinstaller.bat` substandard compression, very elongated loading times; BUT takes 1 minute to compile.
+- `build_client_nuitka_onefile_upx.bat` impressive compression (i.e. 19,425,792 bytes), slower loading times; BUT takes 5 minute to compile.
 > (Ryzen 7 7800X3D CPU, Samsung SSD 990 PRO 2TB (NVMe))
 - `numpyStub.py` to shave off a few MBs; we use only what we NEED to use.
 

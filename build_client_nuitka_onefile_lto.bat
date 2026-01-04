@@ -8,7 +8,7 @@ set PROJECT_NAME=PyPongOnline
 set ENTRY_POINT=client.py
 set ICON_PATH=sprites\program.ico
 set SRCDIR=%~dp0
-set DISTDIR=dist
+set DISTDIR=dist_lto
 set TARGET_EXE=%DISTDIR%\%PROJECT_NAME%.exe
 
 cd /d "%SRCDIR%"
@@ -16,7 +16,7 @@ cd /d "%SRCDIR%"
 REM ==================================================
 REM START TIMER
 REM ==================================================
-echo [%TIME%] Starting MAX-COMPRESSION build...
+echo [%TIME%] Starting build...
 for /f "tokens=1-4 delims=:.," %%a in ("%time%") do (
     set /a START_SEC=%%a*3600 + %%b*60 + %%c
 )
@@ -33,7 +33,7 @@ if not exist "%VENV_PY%" (
 )
 
 REM ==================================================
-REM DEPENDENCY CHECK (EXCLUDE NUMPY)
+REM DEPENDENCY CHECK
 REM ==================================================
 echo [INFO] Checking dependencies...
 "%VENV_PY%" -c "import nuitka, pygame, websockets" 2>nul
@@ -53,10 +53,7 @@ if exist buildver.txt (
     set /p BUILDVER=<buildver.txt
 )
 
-REM Increment
 set /a BUILDVER+=1
-
-REM Save back
 echo %BUILDVER% > buildver.txt
 
 echo [INFO] Build version: %BUILDVER%
@@ -68,9 +65,9 @@ echo [INFO] Cleaning previous build...
 if exist "%TARGET_EXE%" del /q "%TARGET_EXE%" 2>nul
 
 REM ==================================================
-REM NUITKA ONEFILE — MAXIMUM COMPRESSION
+REM NUITKA ONEFILE BUILD
 REM ==================================================
-echo [INFO] Building %PROJECT_NAME% (ONEFILE / MAX COMPRESSION)...
+echo [INFO] Building %PROJECT_NAME%...
 
 "%VENV_PY%" -m nuitka ^
  --onefile ^
@@ -79,6 +76,7 @@ echo [INFO] Building %PROJECT_NAME% (ONEFILE / MAX COMPRESSION)...
  --windows-icon-from-ico="%ICON_PATH%" ^
  --windows-file-version=1.0.0.%BUILDVER% ^
  --windows-product-version=1.0.0.%BUILDVER% ^
+ --windows-console-mode=disable ^
  --include-data-dir=sprites=sprites ^
  --include-module=asyncio ^
  --include-module=websockets ^
@@ -89,17 +87,35 @@ echo [INFO] Building %PROJECT_NAME% (ONEFILE / MAX COMPRESSION)...
  --nofollow-import-to=pydoc ^
  --nofollow-import-to=tkinter ^
  --nofollow-import-to=distutils ^
+ --nofollow-import-to=ftplib ^
+ --nofollow-import-to=telnetlib ^
+ --nofollow-import-to=nntplib ^
+ --nofollow-import-to=smtplib ^
+ --nofollow-import-to=poplib ^
+ --nofollow-import-to=imaplib ^
+ --nofollow-import-to=gopherlib ^
+ --nofollow-import-to=html ^
+ --nofollow-import-to=html.parser ^
+ --nofollow-import-to=xml ^
+ --nofollow-import-to=xmlrpc ^
+ --nofollow-import-to=cgi ^
+ --nofollow-import-to=wsgiref ^
+ --nofollow-import-to=cmd ^
+ --nofollow-import-to=code ^
+ --nofollow-import-to=rlcompleter ^
+ --nofollow-import-to=pdb ^
+ --nofollow-import-to=trace ^
+ --nofollow-import-to=traceback ^
  --lto=yes ^
  --jobs=4 ^
  --assume-yes-for-downloads ^
  --remove-output ^
  "%ENTRY_POINT%"
 
-
 REM ==================================================
 REM VERIFY BUILD
 REM ==================================================
-if not exist "%TARGET_EXE%" ( 
+if not exist "%TARGET_EXE%" (
     echo.
     echo [ERROR] Build failed — executable not created!
     pause
@@ -107,25 +123,15 @@ if not exist "%TARGET_EXE%" (
 )
 
 REM ==================================================
-REM UPX — MAXIMUM POSSIBLE COMPRESSION
+REM COPY RESOURCE DIRECTORIES
 REM ==================================================
-set UPX_DIR=%SRCDIR%upx-5.0.2-win64
-set UPX_EXE=%UPX_DIR%\upx.exe
+echo [INFO] Copying resource folders...
 
-if exist "%UPX_EXE%" (
-    echo [INFO] Attempting ULTRA UPX compression (this may take time)...
-    "%UPX_EXE%" --ultra-brute --lzma "%TARGET_EXE%" 2>upx.log
+robocopy "%SRCDIR%sprites" "%DISTDIR%\sprites" /E /XF *.py *.pyc *.pyo >nul
+robocopy "%SRCDIR%stages" "%DISTDIR%\stages" /E /XF *.py *.pyc *.pyo >nul
 
-    findstr /C:"NotCompressibleException" upx.log >nul
-    if %errorlevel% equ 0 (
-        echo [INFO] UPX: Executable already optimally packed — skipping
-    ) else (
-        echo [INFO] UPX compression applied successfully
-    )
-    del upx.log 2>nul
-) else (
-    echo [WARNING] UPX not found — skipping compression
-)
+echo [INFO] Resource folders copied.
+
 
 REM ==================================================
 REM TIMER END
@@ -141,7 +147,7 @@ REM SUMMARY
 REM ==================================================
 echo.
 echo ==================================================
-echo   BUILD SUCCESSFUL — MAX COMPRESSION
+echo   BUILD SUCCESSFUL
 echo ==================================================
 echo   Output: %TARGET_EXE%
 for %%F in ("%TARGET_EXE%") do echo   Size: %%~zF bytes

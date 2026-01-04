@@ -2,7 +2,7 @@
 entity_map
 0: None
 1: sprites.Player
-2: sprites.CPUPlayer
+2: sprites.OnlinePlayer
 3: sprites.Ball
 10: sprites.GoalLeft
 11: sprites.GoalUp

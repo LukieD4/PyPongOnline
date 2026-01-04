@@ -7,9 +7,11 @@ from config import config
 from resource import resource_path
 from input import inputManager
 from ui_sprites import render_text
+from soundmixer import soundMixer
 
 from socket import gethostname
 from hashlib import sha256
+from random import randint
 
 
 
@@ -75,6 +77,7 @@ class ClientGame:
         self.entities = {
             "ai": [],
             "players": [],
+            "goals": [],
             "balls": [],
             "ui": [],
             "decor": [],
@@ -127,6 +130,14 @@ class ClientGame:
         self.playOFF_countdown_epoch = 0
         self.playOFF_draw_line = False
         self.playOFF_drawn_lines = 0
+        self.playOFF_began = False
+
+        # Game tracking
+        self.game_scores = [0,0,0,0] # for now, 4 players is enough :3
+        self._game_client_username = "LUKIE"
+        self.game_player_names = [self._game_client_username,"WAYNE","JONAH","BOZZY"]
+        self.game_halt_for_x_ticks = 0
+        self.game_goal_scored = False
 
         # Networking
         self.net_connected = False
@@ -296,14 +307,17 @@ class ClientGame:
         if now - self.menu_input_epoch > self.menu_input_cooldown:
 
             if inputManager.get_action("up", keys):
+                soundMixer.play("scroll", "audio/scroll.ogg")
                 self.menu_index = (self.menu_index - 1) % len(self.menu_items)
                 self.menu_input_epoch = now
 
             elif inputManager.get_action("down", keys):
+                soundMixer.play("scroll", "audio/scroll.ogg")
                 self.menu_index = (self.menu_index + 1) % len(self.menu_items)
                 self.menu_input_epoch = now
 
             elif inputManager.get_action("select", keys):
+                soundMixer.play("select", "audio/select.ogg")
                 action = self.menu_actions.get(self.menu_items[self.menu_index])
                 if action:
                     action()
@@ -375,7 +389,7 @@ class ClientGame:
 
             self.entities["ui"] = render_text(
                  "``SERVER IS COLD BOOTING``"
-                f"``THIS MAY TAKE UP TO {self.net_rendercom_timeout} SECONDS``"
+                f"``THIS MAY TAKE UP TO {self.net_rendercom_timeout} SECONDS`BUT USUALLY TAKES 60s`"
                 f"{elapsed_net_out_colour}({self.net_rendercom_timeout-elapsed})&`{self.dots}```#You're the only player online.`thanks for playing my game!"
             )
 
@@ -460,14 +474,17 @@ class ClientGame:
             
 
             if inputManager.get_action("up", keys):
+                soundMixer.play("scroll", "audio/scroll.ogg")
                 self.lobby_index = max(0, self.lobby_index - 1)
                 self.lobby_input_epoch = now
 
             elif inputManager.get_action("down", keys):
+                soundMixer.play("scroll", "audio/scroll.ogg")
                 self.lobby_index = min(len(self.lobbies) - 1, self.lobby_index + 1)
                 self.lobby_input_epoch = now
 
             elif inputManager.get_action("select", keys):
+                soundMixer.play("scroll", "audio/scroll.ogg")
                 if not self.lobby_id:
                     # Prevent an index in empty 'self.lobbies[]' crash
                     if len(self.lobbies) == 0:
@@ -523,7 +540,7 @@ class ClientGame:
             if not ui_entities:
                 # Transition complete
                 self.transition_frame_count = 0
-                self.mode = "online-game"
+                self.mode = "online-gamee"
                 self.trans_spawned_cols = 0
                 self.trans_spawned_rows = 0
                 return
@@ -532,7 +549,123 @@ class ClientGame:
 
 
     def updateOnlineGame(self):
-        self.entities["ui"] = render_text("``ONLINE GAME (WIP)``")
+        # # UPDATE LOGIC: 60FPS
+        # self.playON_tick += 1
+        # keys = pygame.key.get_pressed()
+
+        # # --- Setup on first frame ---
+        # if self.playON_tick == 1:
+
+        #     self.net_in.get()
+        #     self.playON_draw_line = True
+
+        #     # Load stage, auto assigns
+        #     self.entities = self.entitiesAppend(self.stager.load_stage(resource_path("stages/classic.stage")))
+
+
+        # # Draw one dash 12 times a second
+        # if self.playOFF_tick % 5 == 0 and self.playOFF_draw_line:
+        #     center_col = config.MAX_COL // 2
+        #     # spawn a single dash at the next row
+        #     dash_row = self.playOFF_drawn_lines % (config.RES_Y_INIT // 8)
+        #     self.entities["decor"].append(
+        #         sprites.Dashline().summon(
+        #             screen=self.screen,
+        #             target_col=center_col,
+        #             target_row=dash_row
+        #         )
+        #     )
+        #     if self.playOFF_drawn_lines >= 22:
+        #         self.playOFF_draw_line = False
+            
+        #     self.playOFF_drawn_lines += 1
+
+            
+        # # --- Game only starts once line has been drawn. ---
+        # if self.playOFF_draw_line:
+        #     return
+        # # --- --- --- --- --- ---
+
+        # player60: sprites.Player
+        # ball60: sprites.Ball
+        # ai60: sprites.CPUPlayer
+        # # Update the players
+        # for player60 in self.entities["players"]:
+        #     player60.task_wss(keys)
+        #     self.net_out.put()
+        
+        # # Update the balls
+        # for ball60 in self.entities["balls"]:
+        #     ball60.task()
+
+        
+        # # Check collisions
+        # goal: sprites.Goal
+        # ball: sprites.ClientBall
+        # player: sprites.ClientPlayer
+
+        # for ball in self.entities["balls"]:
+        #     # -- Ball v. Player
+        #     for player in self.entities["players"]+self.entities["ai"]:
+        #         if self.check_collision(ball.sprite_rect, player.sprite_rect):
+
+        #             # Successful hit, but check owner to prevent multiple hit registrations
+        #             if not ball.owner or ball.owner != player:
+        #                 print(ball.owner, "hit by", player)
+        #                 ball.owner = player
+        #                 ball.set_velocity_basedOnPlayerMotion(player)
+            
+        #     # -- Ball v. Goals
+        #     for goal in self.entities["goals"]:
+        #         if ball.gotScored: continue
+        #         if self.check_collision(goal.sprite_rect, ball.sprite_rect):
+                    
+        #             # Set flag
+        #             ball.gotScored = True
+
+        #             # Halt game (starts next frame)
+        #             self.game_halt_for_x_ticks = 180
+        #             self.game_goal_scored = True
+
+        #             # Which post?
+        #             goal_name = goal.__class__.__name__
+        #             if "Left" in goal_name:
+        #                 self.game_scores[2] += 1
+        #                 ball.set_velocity(-1,0) # reset, set velocity toward Left player
+        #             elif "Right" in goal_name:
+        #                 self.game_scores[0] += 1
+        #                 ball.set_velocity(1,0) # reset, set velocity toward Right player
+
+        #             # Check which goal belongs
+        #             print(goal.__class__.__name__)
+        
+        # # Check screen edge for ball redirect
+        # for ball in self.entities["balls"]:
+        #     # if ball.sprite_rect.left <= 0 or ball.sprite_rect.right >= config.res_x:
+        #     #     ball.set_velocity(-ball.velocity_x, ball.velocity_y)
+        #     if ball.sprite_rect.top <= 0 or ball.sprite_rect.bottom >= config.res_y:
+        #         print("edging!")
+        #         ball.set_velocity(ball.velocity_x, -ball.velocity_y)
+
+        
+        # # -- debug, return ball back
+        # if keys[pygame.K_f]:
+        #     print("DEBUG: resetting ball position")
+        #     for ball in self.entities["balls"]:
+        #         ball.gotScored = False
+        #         ball.current_speed = ball.base_speed
+        #         ball.owner = None
+        #         ball.set_velocity(-1,0)
+        #         ball.move_position(dcol=config.MAX_COL // 3, drow=config.MAX_ROW // 2, set_position=True)
+        
+
+
+        # # testing ui
+        # ui = render_text(f"¬¬¬   {self.game_scores[0]}   {self.game_scores[2]}`````````````````````(P1) {self.game_player_names[0]}¬¬¬   {self.game_player_names[2]} (P2)", justification=None)
+        # # ui = render_text("0   0`A`A`A`A`A`A`A`A`A`A`A`A`A`A")
+        
+        # self.entities["ui"] = ui
+        pass
 
     
     # ========================================================
@@ -551,7 +684,10 @@ class ClientGame:
         # Sound timing (every half batch)
         if self.transOFF_tick % (CELLS_PER_FRAME // 2) == 0:
             self.trans_sfx_interval += 1
-            # soundManager.play(...)
+            soundMixer.set_volume("transition", .1)
+            soundMixer.play("transition", "audio/transition.ogg")
+
+
 
         for _ in range(CELLS_PER_FRAME):
 
@@ -590,30 +726,42 @@ class ClientGame:
         self.playOFF_tick += 1
         keys = pygame.key.get_pressed()
 
-        # Setup on first frame
+        # --- Setup on first frame ---
         if self.playOFF_tick == 1:
             self.playOFF_draw_line = True
 
             # Load stage, auto assigns
             self.entities = self.entitiesAppend(self.stager.load_stage(resource_path("stages/classic.stage")))
-            
-            # self.entities["balls"].append(sprites.Ball().summon(
-            #     screen=self.screen,
-            #     target_row=config.MAX_ROW // 2,
-            #     target_col=config.MAX_COL // 2,
-            # ))
-            # self.entities["players"].append(sprites.Player().summon(
-            #     screen=self.screen,
-            #     target_row=(config.MAX_ROW // 2),
-            #     target_col=2))
-            # self.entities["ai"].append(sprites.CPUPlayer().summon(
-            #     screen=self.screen,
-            #     target_row=(config.MAX_ROW // 2),
-            #     target_col=config.MAX_COL-2))
+
+
+        # --- Halt frames ---
+        if self.game_halt_for_x_ticks>0:
+            self.game_halt_for_x_ticks-=1
+            return
+        
+        # was the game halted because of a scored ball?
+        if self.game_goal_scored:
+            self.game_goal_scored = False
+            # - respawn balls
+            for ball in self.entities["balls"]:
+                ball.gotScored = False
+                ball.respawn()
+                # (velocity is set as the ball is scored.)
+
+            # - respawn players and ai
+            for player in self.entities["players"]+self.entities["ai"]:
+                player.respawn()
+
+        # should anything respawn?
+        for entity60 in self.entities["players"]+self.entities["ai"]+self.entities["balls"]:
+            if entity60.mark_for_respawn:
+                entity60.respawn()
+
 
         # Tick all entities
-        for entity in self.entitiesAllReturn():
-            entity.ticker()
+        entity60: sprites.Sprite
+        for entity60 in self.entitiesAllReturn():
+            entity60.ticker()
 
         # Draw one dash 12 times a second
         if self.playOFF_tick % 5 == 0 and self.playOFF_draw_line:
@@ -635,23 +783,31 @@ class ClientGame:
             
         # --- Game only starts once line has been drawn. ---
         if self.playOFF_draw_line:
+            self.playOFF_began = True
             return
         # --- --- --- --- --- ---
-        
-        entity60: sprites.Sprite
+
+        if self.playOFF_began:
+            self.playOFF_began = False
+            soundMixer.play("initial_velocity", f"audio/initial_velocity.ogg")
 
         # Update the player
         for entity60 in self.entities["players"]:
             entity60.task(keys)
         
-        # Update the balls, ai
-        for entity60 in self.entities["balls"]+self.entities["ai"]:
+        # Update the balls
+        for entity60 in self.entities["balls"]:
             entity60.task()
 
+        # Update the ai
+        for entity60 in self.entities["ai"]:
+            entity60.task(self.entities["balls"][0])
         
         # Check collisions
+        goal: sprites.Goal
         ball: sprites.Ball
         player: sprites.Player
+
         for ball in self.entities["balls"]:
             # -- Ball v. Player
             for player in self.entities["players"]+self.entities["ai"]:
@@ -660,14 +816,43 @@ class ClientGame:
                     # Successful hit, but check owner to prevent multiple hit registrations
                     if not ball.owner or ball.owner != player:
                         print(ball.owner, "hit by", player)
+                        soundMixer.play("bonk", f"audio/bonk{randint(1,2)}.ogg")
                         ball.owner = player
                         ball.set_velocity_basedOnPlayerMotion(player)
+            
+            # -- Ball v. Goals
+            for goal in self.entities["goals"]:
+                if ball.gotScored: continue
+                if self.check_collision(goal.sprite_rect, ball.sprite_rect):
+                    
+                    # Set flag
+                    ball.gotScored = True
+
+                    # Halt game (starts next frame)
+                    self.game_halt_for_x_ticks = 180
+                    self.game_goal_scored = True
+
+                    # Which post?
+                    goal_name = goal.__class__.__name__
+                    if "Left" in goal_name:
+                        self.game_scores[2] += 1
+                        soundMixer.play("goal_opponent", "audio/scored_opponent.ogg")
+                        ball.set_velocity(-1,0) # reset, set velocity toward Left player
+                    elif "Right" in goal_name:
+                        self.game_scores[0] += 1
+                        soundMixer.play("goal_client", "audio/scored_client.ogg")
+                        ball.set_velocity(1,0) # reset, set velocity toward Right player
+
+                    # Check which goal belongs
+                    print(goal.__class__.__name__)
         
         # Check screen edge for ball redirect
         for ball in self.entities["balls"]:
             # if ball.sprite_rect.left <= 0 or ball.sprite_rect.right >= config.res_x:
             #     ball.set_velocity(-ball.velocity_x, ball.velocity_y)
             if ball.sprite_rect.top <= 0 or ball.sprite_rect.bottom >= config.res_y:
+                print("edging!")
+                soundMixer.play("initial_velocity", f"audio/initial_velocity.ogg")
                 ball.set_velocity(ball.velocity_x, -ball.velocity_y)
 
         
@@ -675,6 +860,7 @@ class ClientGame:
         if keys[pygame.K_f]:
             print("DEBUG: resetting ball position")
             for ball in self.entities["balls"]:
+                ball.gotScored = False
                 ball.current_speed = ball.base_speed
                 ball.owner = None
                 ball.set_velocity(-1,0)
@@ -683,7 +869,7 @@ class ClientGame:
 
 
         # testing ui
-        ui = render_text("¬¬¬   0   0`````````````````````(P1) Lukie¬¬¬   Lukie (P2)", justification=None)
+        ui = render_text(f"¬¬¬   {self.game_scores[0]}   {self.game_scores[2]}`````````````````````(P1) {self.game_player_names[0]}¬¬¬   {self.game_player_names[2]} (P2)", justification=None)
         # ui = render_text("0   0`A`A`A`A`A`A`A`A`A`A`A`A`A`A")
         
         self.entities["ui"] = ui
@@ -797,10 +983,12 @@ class ClientGame:
         self.saveGameSettings()
     
     def entitiesAppend(self, new_entities):
-        combined_entities = self.entities
         for team, items in new_entities.items():
-            combined_entities[team].extend(items)
-        return combined_entities
+            for ent in items:
+                if ent not in self.entities[team]:
+                    self.entities[team].append(ent)
+        return self.entities
+
 
 
     def entitiesAllReturn(self):

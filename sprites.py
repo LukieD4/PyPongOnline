@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import pygame, time, random
 
 from random import randint
@@ -18,10 +20,14 @@ class Sprite:
     def __init__(self):
         # (Float) Pixel coords
         self.pos_x, self.pos_y = 0, 0
-        self.pos_row, self.pos_col = int(0), int(0)
+        self.pos_row, self.pos_col = 0,0
         # (Float) (consts)
         self.POS_X_OFFSET, self.POS_Y_OFFSET = 0, 0
         self.POS_X_PREV, self.POS_Y_PREV = 0, 0
+        
+        # Spawned
+        self.SUMMONED_POS_X, self.SUMMONED_POS_Y = 0, 0
+        self.SUMMONED_POS_ROW, self.SUMMONED_POS_COL = 0,0
         
         # (Ideal: Integer) (const) 
         self.__SCALE = 1
@@ -41,6 +47,7 @@ class Sprite:
 
         # mark
         self.mark_for_deletion = False
+        self.mark_for_respawn = False
 
         # SURFACE LIFECYCLE (single rendered surface):
         # - self.surface_original: the raw image loaded from disk (unscaled, unmodified)
@@ -158,6 +165,11 @@ class Sprite:
             # From coord_pixel + offsets, translate into pixelspace | LOSES ACCURACY WITH OFFSET
             coord_grid = pixel_to_grid(x=int(self.pos_x), y=int(self.pos_y))
             self.pos_row, self.pos_col = coord_grid["row"], coord_grid["col"]
+        
+        # Update empty spawn constants
+        coord_grid = pixel_to_grid(x=int(self.pos_x), y=int(self.pos_y))
+        self.SUMMONED_POS_X, self.SUMMONED_POS_Y = self.pos_x, self.pos_y
+        self.SUMMONED_POS_ROW, self.SUMMONED_POS_COL = coord_grid["row"], coord_grid["col"]
 
         # If a colour was passed, stash it (so future animations/rescales reuse it)
         if colour is not None:
@@ -189,7 +201,8 @@ class Sprite:
         self.screen = screen
         return self
 
-
+    def respawn(self) -> None:
+        self.move_position(dx=self.SUMMONED_POS_X,dy=self.SUMMONED_POS_Y,set_position=True)
 
     #region rescale
     def rescale(self):
@@ -246,8 +259,16 @@ class Sprite:
             self.sprite_rect.topleft = (self.pos_x, self.pos_y)
 
         screen.blit(self.surface_render, (self.pos_x, self.pos_y))
+    
 
-
+    #region Spritesheet
+    def replace_spritesheet(self, new_spritesheet):
+        self.spritesheet = new_spritesheet
+        # reset oscillator and surfaces
+        self._sprite_oscillator = 0
+        # reload initial frame using set_sprite to keep tint behaviour consistent
+        self.set_sprite(0, 0, recolour=self.surface_tint_color)
+    
     def set_sprite(self, anim_index: int, frame_index: int, recolour: tuple[int,int,int] | None = None):
         """
         Load frame from disk into surface_original, optionally recolour it and cache the tinted original.
@@ -274,41 +295,6 @@ class Sprite:
 
         if self.sprite_rect and self.surface_render:
             self.sprite_rect.size = self.surface_render.get_size()
-
-    #region Spritesheet
-    def replace_spritesheet(self, new_spritesheet):
-        self.spritesheet = new_spritesheet
-        # reset oscillator and surfaces
-        self._sprite_oscillator = 0
-        # reload initial frame using set_sprite to keep tint behaviour consistent
-        self.set_sprite(0, 0, recolour=self.surface_tint_color)
-    
-    # def set_sprite(self, anim_index: int, frame_index: int, recolour: tuple[int,int,int] | None = None):
-    #     """
-    #     Load frame from disk into surface_original, optionally recolour it and cache the tinted original.
-    #     Then scale and set surface_render (the one surface used for drawing).
-    #     """
-    #     # Update tint color if recolour explicitly provided
-    #     if recolour is not None:
-    #         self.surface_tint_color = tuple(recolour)
-
-    #     # Load raw frame
-    #     raw = loadSprite([self.spritesheet[anim_index][frame_index]])
-    #     self.surface_original = raw.convert_alpha()
-
-    #     # If a tint colour exists, produce a tinted original; else clear it
-    #     if self.surface_tint_color is not None:
-    #         self.surface_tinted_original = self._tint_surface(self.surface_original, self.surface_tint_color)
-    #         source = self.surface_tinted_original
-    #     else:
-    #         self.surface_tinted_original = None
-    #         source = self.surface_original
-
-    #     # Scale to current global * per-sprite scale
-    #     self.surface_render = self._build_render_surface(source)
-
-    #     if self.sprite_rect and self.surface_render:
-    #         self.sprite_rect.size = self.surface_render.get_size()
 
     def oscillate_sprite(self, oscillator_override: int | None = None):
         """
@@ -349,14 +335,15 @@ class Sprite:
 
         # __SCALE MOVEMENT TO MATCH RENDER __SCALE
         scale = config.resolution_scale
-        dx *= scale
-        dy *= scale
-
+        
         if set_position:
-            # DIRECTLY SET POSITION
+            # DIRECTLY SET POSITION (resolution_scale already applied)
             self.pos_x = dx
             self.pos_y = dy
         else:
+            # APPLY SCALING BASED ON RESOLUTION
+            dx *= scale
+            dy *= scale
             # APPLY MOVEMENT
             self.pos_x += dx
             self.pos_y += dy
@@ -432,6 +419,39 @@ class Logo(Sprite):
 
 
 
+#region Goals
+class Goal(Sprite):
+    def __init__(self):
+        super().__init__()
+        self.team = "goals"
+
+class GoalLeft(Goal):
+    def __init__(self):
+        super().__init__()
+        self.spritesheet = [[sprites_dir / "font" / "L.png"]]
+
+class GoalRight(Goal):
+    def __init__(self):
+        super().__init__()
+        self.spritesheet = [[sprites_dir / "font" / "R.png"]]
+
+class GoalUp(Goal):
+    def __init__(self):
+        super().__init__()
+        self.spritesheet = [[sprites_dir / "font" / "U.png"]]
+
+class GoalDown(Goal):
+    def __init__(self):
+        super().__init__()
+        self.spritesheet = [[sprites_dir / "font" / "D.png"]]
+
+class OutOfBounds(Goal):
+    def __init__(self):
+        super().__init__()
+        self.spritesheet = [[sprites_dir / "font" / "O.png"]]
+
+
+
 
 
 #region Dummy
@@ -445,6 +465,8 @@ class Dummy(Sprite):
         self.pos_y_prev = 0
         self.pos_motion_mult = 0
         self.pos_desync_calc = 0
+        self.speed = 2
+        self.client = True
 
 #region Player
 class Player(Dummy):
@@ -452,37 +474,42 @@ class Player(Dummy):
         super().__init__()
         self.team = "players"
 
-        self.speed = 2
-
         # Define movement orientation, future case to if we want Players on different sides of the screen
         self.movement_orientation = {"forward": "up", "backward": "down"}
     
     def task(self, keys=None):
 
+        # Defer further checks via online
+        if not self.client:
+            self.wss()
+            return
+
         # Check keys if provided
         if keys is None: return
 
+        # Movement parameters
         has_inputted = False
         applied_speed = self.speed
         is_y_upOOB = not (self.pos_y-applied_speed > 0)
         is_y_downOOB = not ((self.pos_y+applied_speed) < config.res_y-(config.CELL_SIZE*config.resolution_scale))
 
         if inputManager.get_action(self.movement_orientation["forward"], keys) and not is_y_upOOB:
-            has_inputted = True
+            # has_inputted = True
             self.move_position(dy=-applied_speed)
         if inputManager.get_action(self.movement_orientation["backward"], keys) and not is_y_downOOB:
-            has_inputted = True
+            # has_inputted = True
             self.move_position(dy=applied_speed)
         
         # Check the pixels the player has moved since last x frames, but skip if player has moved
-        if self.tick % 30 == 0 and not has_inputted:
+        if self.tick % 10 == 0 and not has_inputted:
             self.pos_y_prev = self.pos_y
             # print(f"movement delta: {delta_y}")
-        
-        if self.tick % 120 == 0:
-            # self.o
+    
+    def wss(self):
+
+        # heartbeat every 10 ticks
+        if self.tick % 10 == 0:
             pass
-        
 
 
 #region CPUPlayer
@@ -490,27 +517,48 @@ class CPUPlayer(Dummy):
     def __init__(self):
         super().__init__()
         self.team = "ai"
-        self.speed = 8
         self.sprite_index = 2
         
     
-    def task(self):
-        if (self.pos_y+self.speed < 0) or (self.pos_y+self.speed > config.res_y):
-            self.speed *= -1
+    def task(self, ball: Ball):
+        # Only react if ball is approaching
+        ball_approaching = ball.velocity_x > 0
+        if not ball_approaching:
+            return
 
-        # self.set_sprite(0,2,recolour=(255,255,255))
-        # self.sprite_index = (self.sprite_index%4) + 1
-        if self.tick % 15 == 0:
-            self.set_sprite(0,0)
-        elif self.tick % 20 == 0:
-            self.set_sprite(0,1)
-        elif self.tick % 25 == 0:
-            self.set_sprite(0,2)
-        elif self.tick % 31 == 0:
-            self.set_sprite(0,3)
+        # Vertical difference
+        dy_to_ball = ball.pos_y - self.pos_y
+
+        # Deadzone to avoid jitter
+        DEADZONE = 4
+        if abs(dy_to_ball) < DEADZONE:
+            return
+
+        # Decide direction
+        direction = 1 if dy_to_ball > 0 else -1
+
+        # Proposed delta movement
+        dy = direction * self.speed
+
+        # Clamp delta so we don't move out of bounds
+        top_limit = 0
+        bottom_limit = config.res_y - (config.CELL_SIZE * config.resolution_scale)
+
+        # If applying dy would go out of bounds, cancel it
+        new_y = self.pos_y + dy
+        if new_y < top_limit or new_y > bottom_limit:
+            dy = 0
+
+        # Apply delta movement (NOT absolute)
+        self.move_position(dy=dy)
+
+        # Track movement every X ticks
+        if self.tick % 30 == 0:
+            self.pos_y_prev = self.pos_y
         
-        
-        # self.move_position(0,self.speed)
+
+
+
 
 #region Ball
 class Ball(Sprite):
@@ -524,12 +572,16 @@ class Ball(Sprite):
             ball_dir / "3.png",
         ]]
 
+        # Flags
+        self.gotScored = False
+        self.mark_for_respawn = False
+
         # Initial velocity
         self.velocity_x = -1
         self.velocity_y = 0
 
         # Speed control
-        self.base_speed = 1.0
+        self.base_speed = 1
         self.current_speed = self.base_speed
         self.max_speed = 4.0
         self.speed_increment = 0.15
@@ -551,7 +603,7 @@ class Ball(Sprite):
 
     def set_velocity_basedOnPlayerMotion(self, player: Player):
         # influence
-        max_influence = 1
+        max_influence = .5
         delta = player.pos_y - player.pos_y_prev
         delta = max(-max_influence, min(max_influence, delta))
 
@@ -565,23 +617,15 @@ class Ball(Sprite):
         return self.set_velocity(new_x, new_y)
 
 
-
     def set_velocity(self, velocity_x=None, velocity_y=None):
         if velocity_x is not None:
             self.velocity_x = velocity_x
-
         if velocity_y is not None:
             self.velocity_y = velocity_y
 
-        # --- NORMALISE VECTOR ---
         mag = (self.velocity_x**2 + self.velocity_y**2) ** 0.5
         if mag != 0:
-            # scale to current_speed
-            scale = self.current_speed / mag
-            self.velocity_x *= scale
-            self.velocity_y *= scale
+            self.velocity_x = (self.velocity_x / mag) * self.current_speed
+            self.velocity_y = (self.velocity_y / mag) * self.current_speed
 
         return self.velocity_x, self.velocity_y
-
-
-        
