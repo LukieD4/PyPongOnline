@@ -213,3 +213,5 @@ PyPongOnlineWSS.url
 game_settings.txt
 dist_lto/
 dist_upx/
+build_linux/
+build_windows/

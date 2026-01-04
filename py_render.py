@@ -1,8 +1,8 @@
 import pygame
 import math
 
-from resource import resource_path
-from config import config
+from py_resource import resource_path
+from py_config import config
 
 def recolourSprite(surface: pygame.Surface, new_colour, preserve_alpha=True):
     """

@@ -1,9 +1,9 @@
-import numpyStub as np
+import py_numpyStub as np
 
-from resource import resource_path
-from sprites import Sprite
-from numpyStub import copy as np_copy
-from config import config
+from py_resource import resource_path
+from py_sprites import Sprite
+from py_numpyStub import copy as np_copy
+from py_config import config
 
 sprites_dir = resource_path("sprites") / "font"
 

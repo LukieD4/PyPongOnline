@@ -4,10 +4,10 @@ import pygame, time, random
 
 from random import randint
 
-from resource import resource_path
-from render import loadSprite, scaleSprite, grid_to_pixel, pixel_to_grid
-from config import config
-from input import inputManager
+from py_resource import resource_path
+from py_render import loadSprite, scaleSprite, grid_to_pixel, pixel_to_grid
+from py_config import config
+from py_input import inputManager
 
 # Directories
 sprites_dir = resource_path("sprites")

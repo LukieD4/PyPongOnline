@@ -1,5 +1,5 @@
-import sprites
-from config import config
+import py_sprites
+from py_config import config
 
 TILE_BUFFER_OFFSET = 1
 
@@ -44,7 +44,7 @@ class Stager:
                         # expect "sprites.ClassName"
                         try:
                             _, class_name = class_str.split(".", 1)
-                            cls = getattr(sprites, class_name)
+                            cls = getattr(py_sprites, class_name)
                         except Exception:
                             cls = None
                         self.entity_map[idx] = cls

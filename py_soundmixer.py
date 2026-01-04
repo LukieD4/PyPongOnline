@@ -1,7 +1,6 @@
 # soundmixer.py
 import pygame
-from pathlib import Path
-from resource import resource_path
+from py_resource import resource_path
 
 
 class SoundMixer:
@@ -38,7 +37,7 @@ class SoundMixer:
 
         path = resource_path(relative_path)
 
-        if not Path(path).exists():
+        if not resource_path(path).exists():
             print(f"[SoundMixer] Missing sound file: {path}")
             return
 

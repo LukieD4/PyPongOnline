@@ -1,13 +1,13 @@
 import pygame, os, time, asyncio, websockets, queue, threading, json, sys
 
-import sprites
-from stager import Stager
+import py_sprites
+from py_stager import Stager
 
-from config import config
-from resource import resource_path
-from input import inputManager
-from ui_sprites import render_text
-from soundmixer import soundMixer
+from py_config import config
+from py_resource import resource_path
+from py_input import inputManager
+from py_ui_sprites import render_text
+from py_soundmixer import soundMixer
 
 from socket import gethostname
 from hashlib import sha256
@@ -522,7 +522,7 @@ class ClientGame:
             # Spawn phase
             if self.trans_spawned_rows <= config.MAX_ROW:
                 ui_entities.append(
-                    sprites.Cell().summon(
+                    py_sprites.Cell().summon(
                         target_row=self.trans_spawned_rows,
                         target_col=self.trans_spawned_cols,
                         screen=self.screen
@@ -694,7 +694,7 @@ class ClientGame:
             # Spawn phase
             if self.trans_spawned_rows <= config.MAX_ROW:
                 ui_entities.append(
-                    sprites.Cell().summon(
+                    py_sprites.Cell().summon(
                         target_row=self.trans_spawned_rows,
                         target_col=self.trans_spawned_cols,
                         colour=(100, 100, 100),
@@ -759,7 +759,7 @@ class ClientGame:
 
 
         # Tick all entities
-        entity60: sprites.Sprite
+        entity60: py_sprites.Sprite
         for entity60 in self.entitiesAllReturn():
             entity60.ticker()
 
@@ -769,7 +769,7 @@ class ClientGame:
             # spawn a single dash at the next row
             dash_row = self.playOFF_drawn_lines % (config.RES_Y_INIT // 8)
             self.entities["decor"].append(
-                sprites.Dashline().summon(
+                py_sprites.Dashline().summon(
                     screen=self.screen,
                     target_col=center_col,
                     target_row=dash_row
@@ -804,9 +804,9 @@ class ClientGame:
             entity60.task(self.entities["balls"][0])
         
         # Check collisions
-        goal: sprites.Goal
-        ball: sprites.Ball
-        player: sprites.Player
+        goal: py_sprites.Goal
+        ball: py_sprites.Ball
+        player: py_sprites.Player
 
         for ball in self.entities["balls"]:
             # -- Ball v. Player
@@ -905,7 +905,7 @@ class ClientGame:
         self.screen = pygame.display.set_mode((config.res_x, config.res_y))
 
         pygame.display.set_icon(
-            sprites.loadSprite([resource_path("sprites/cell.png")])
+            py_sprites.loadSprite([resource_path("sprites/cell.png")])
         )
         pygame.display.set_caption("PyPongOnline")
 
