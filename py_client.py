@@ -1,8 +1,8 @@
 import pygame, os, time, asyncio, websockets, queue, threading, json, sys
 
 import py_sprites
-from py_stager import Stager
 
+from py_stager import Stager
 from py_config import config
 from py_resource import resource_path
 from py_input import inputManager
@@ -118,6 +118,9 @@ class ClientGame:
         self.menu_input_cooldown = 0.19
         self.menu_credit_image = False
 
+        # Main loop
+        self.mainloop_halt_for_x_ticks = 0
+
         # Transition
         self.transON_tick = 0
         self.transOFF_tick = 0
@@ -147,13 +150,15 @@ class ClientGame:
         self.net_out = queue.Queue()
 
         self.net_connected_epoch = 0
-        self.net_rendercom_timeout = 300
+        self.net_rendercom_timeout = 150
         self.net_rendercom_retry_s = 15
         self.net_timeout = 60
         self.net_last_error = None
         self.net_lost_tick = 0
         # Retry throttling (prevents spam reconnects)
         self.net_last_epoch_attempt = 0
+        self.net_is_rate_limited = False
+        self.net_is_rate_limited_prev = False
 
         # Online / Lobby
         self.online_tick = 0
@@ -254,6 +259,12 @@ class ClientGame:
             self.net_last_error
             and "timed out during opening handshake" in self.net_last_error
         )
+    
+    def has_connection_refused(self):
+        return (
+            self.net_last_error
+            and any(err in self.net_last_error for err in ( "remote computer refused", "getaddrinfo failed", "http 404", "http 403"))
+        )
 
     def clear_network_queues(self):
         while not self.net_in.empty():
@@ -340,6 +351,12 @@ class ClientGame:
             self.net_last_epoch_attempt = 0
             self.mode = "online-waiting"
             return
+        
+        # Dev: the user forgot to launch their server
+        if self.has_connection_refused():
+            self.entities["ui"] = render_text(f"````(DEV)`Server settings failed```{self.net_last_error}`````@This screen is permanent``until restart.&")
+            return
+            
 
         # Defer to only every 30 frames, (2 times a second)
         if self.online_tick % 30 == 0:
@@ -348,6 +365,7 @@ class ClientGame:
 
         # If the player is connected online, redirect to lobby menu
         if self.net_connected:
+            soundMixer.play("connection_connected", "audio/connection_connected.ogg")
             self.net_out.put(json.dumps({"type": "list_lobbies"}))
             self.mode = "lobby"
             return
@@ -433,22 +451,33 @@ class ClientGame:
             msg = json.loads(raw)
             msg_type = msg.get("type")
 
-            if msg_type == "lobby_list":
-                self.lobbies = msg.get("lobbies", [])
+            # --- Check if the user got rate limited ---
+            self.net_is_rate_limited = ("rate_limited" in msg_type)
+            if self.net_is_rate_limited_prev != self.net_is_rate_limited:
+                self.net_is_rate_limited_prev = self.net_is_rate_limited
+                soundMixer.play("connection_rl", "audio/connection_rl.ogg")
+            print(self.net_is_rate_limited)
 
-            elif msg_type == "lobby_status":
-                # set lobby info if joined
-                self.lobby_id = msg.get("id")
-                self.lobby_name = msg.get("name")
+            # --- Check for lobby assoicated things ---
+            if not self.net_is_rate_limited:
 
+                if msg_type == "lobby_list":
+                    self.lobbies = msg.get("lobbies", [])
 
-            elif msg_type == "joined_lobby":
-                # should this be here?
-                self.lobby_id = msg.get("id")
-                self.lobby_name = msg.get("name")
+                elif msg_type == "lobby_status":
+                    # set lobby info if joined
+                    
+                    self.lobby_id = msg.get("id")
+                    self.lobby_name = msg.get("name")
 
-            elif msg_type == "start_game":
-                self.mode = "transON-init"
+                    if self.lobby_id and self.lobby_name:
+                        soundMixer.play("lobby_create", "audio/lobby_create.ogg")
+                    else:
+                        soundMixer.play("lobby_leave", "audio/lobby_leave.ogg")
+
+                elif msg_type == "start_game":
+                    self.mode = "transON-init"
+        
 
         # User inputs
         if now - self.lobby_input_epoch > 0.2 and not self.mode in ["transON-init", "transOFF-init"]:
@@ -851,7 +880,7 @@ class ClientGame:
             # if ball.sprite_rect.left <= 0 or ball.sprite_rect.right >= config.res_x:
             #     ball.set_velocity(-ball.velocity_x, ball.velocity_y)
             if ball.sprite_rect.top <= 0 or ball.sprite_rect.bottom >= config.res_y:
-                print("edging!")
+                # print("edging!")
                 soundMixer.play("initial_velocity", f"audio/initial_velocity.ogg")
                 ball.set_velocity(ball.velocity_x, -ball.velocity_y)
 
@@ -882,8 +911,10 @@ class ClientGame:
 
     def initLostConnectionMenu(self):
         self.net_lost_tick = 0
+        soundMixer.play("connection_lost", "audio/connection_lost.ogg")
         self.entities["ui"].clear()
         self.mode = "lost"
+        
 
     def updateLostConnectionMenu(self):
         self.net_lost_tick += 1
@@ -933,6 +964,10 @@ class ClientGame:
             if self.mode_old != self.mode:
                 inputManager.mode = self.mode
                 self.mode_old = self.mode
+
+            # Dev: halt the main loop
+            if self.mainloop_halt_for_x_ticks > 0:
+                self.mainloop_halt_for_x_ticks -= 1
 
             # Detect true connection loss (not cold-boot)
             if (
@@ -1040,6 +1075,14 @@ class ClientGame:
         self.entities["ui"] = render_text(title + body)
 
     def renderLobbyUI(self):
+
+        # -- Punish rate limiter
+        if self.net_is_rate_limited:
+            self.entities["ui"] = render_text("``:STOP SPAMMING&``Try again later``````@ESC &Back")
+            return
+
+
+        # -- Generate the usual 
         text = "``AVAILABLE LOBBIES``"
 
         for i, lobby in enumerate(self.lobbies):

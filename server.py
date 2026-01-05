@@ -1,6 +1,4 @@
-import json
-import uuid
-import random
+import json, uuid, random, time
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
@@ -20,6 +18,15 @@ lobbies: dict[str, dict] = {}
 
 async def send(ws: WebSocket, payload: dict):
     await ws.send_text(json.dumps(payload))
+
+
+async def reject_request():
+    payload = {
+        "type": "rate_limited"
+    }
+
+    for ws in list(clients):
+        await send(ws, payload)
 
 
 async def broadcast_lobbies():
@@ -89,7 +96,12 @@ def root():
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
-    clients[ws] = {"lobby": None}
+    clients[ws] = {
+        "lobby": None,
+        # rl = Rate limit
+        "rlLobbyRequestTime": time.time(),
+        "rlLobbyRequestPastMinute": 0,
+    }
 
     try:
         while True:
@@ -101,6 +113,24 @@ async def websocket_endpoint(ws: WebSocket):
 
             msg = json.loads(raw)
             msg_type = msg.get("type")
+
+            now = time.time()
+
+            # -- Clear slate every 30 seconds
+            if now - clients[ws]["rlLobbyRequestTime"] >= 30:
+                clients[ws]["rlLobbyRequestTime"] = now
+                clients[ws]["rlLobbyRequestPastMinute"] = 0
+
+            # -- Reject user if too many lobby requests
+            if clients[ws]["rlLobbyRequestPastMinute"] >= 10:
+                await reject_request()
+                continue
+            else:
+                clients[ws]["rlLobbyRequestPastMinute"] += 1
+
+            
+
+            print(clients[ws]["rlLobbyRequestPastMinute"],clients[ws]["rlLobbyRequestPastMinute"])
 
             # -----------------------------
             # LIST LOBBIES

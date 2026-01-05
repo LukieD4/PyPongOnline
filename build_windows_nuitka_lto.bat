@@ -5,10 +5,10 @@ REM ==================================================
 REM PROJECT CONFIG
 REM ==================================================
 set PROJECT_NAME=PyPongOnline
-set ENTRY_POINT=client.py
+set ENTRY_POINT=py_client.py
 set ICON_PATH=sprites\program.ico
 set SRCDIR=%~dp0
-set DISTDIR=dist_lto
+set DISTDIR=build_windows
 set TARGET_EXE=%DISTDIR%\%PROJECT_NAME%.exe
 
 cd /d "%SRCDIR%"
@@ -52,9 +52,6 @@ set BUILDVER=0
 if exist buildver.txt (
     set /p BUILDVER=<buildver.txt
 )
-
-set /a BUILDVER+=1
-echo %BUILDVER% > buildver.txt
 
 echo [INFO] Build version: %BUILDVER%
 
