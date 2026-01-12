@@ -291,6 +291,7 @@ def make_init(filepath):
         super(type(self), self).__init__()
         self.spritesheet = [[filepath]]
         self.color_override = None  # Initialize color override attribute
+        self.team = "ui"
     return __init__
 
 

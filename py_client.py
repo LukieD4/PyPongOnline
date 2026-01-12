@@ -105,6 +105,8 @@ class ClientGame:
         self.mode_old = None
 
         # Main Menu
+        self.main_menu_tick = 0
+        self.main_menu_speaker = None
         self.menu_index = 0
         self.menu_items = ["SOLO", "ONLINE", "SCREEN", "QUIT"]
         self.menu_actions = {
@@ -136,6 +138,7 @@ class ClientGame:
         self.playOFF_began = False
 
         # Game tracking
+        self.game_volume = 1 # THIS GETS SET UPON SETTINGS LOAD ("volume=")
         self.game_scores = [0,0,0,0] # for now, 4 players is enough :3
         self._game_client_username = "LUKIE"
         self.game_player_names = [self._game_client_username,"WAYNE","JONAH","BOZZY"]
@@ -170,6 +173,9 @@ class ClientGame:
         # ui
         self.ui_ellipse = 0
         self.dots = ""
+
+        # load everything
+        self.loadGameSettings()
 
         # Mode dispatch
         self.update_methods = {
@@ -296,19 +302,33 @@ class ClientGame:
         self.rescaleWindow()
     
     def action_quit(self):
-        pygame.quit()
+        # errorless exit because I think I'm ocd
+        try:
+            quit()
+        finally:
+            exit()
 
     # ========================================================
     # Main Menu
     #region MainMenu
 
     def initMainMenu(self):
+        self.main_menu_tick = 0
         self.mode = "menu"
 
     def updateMainMenu(self):
+        self.main_menu_tick += 1
         keys = pygame.key.get_pressed()
         now = time.time()
 
+        # Volume sprites
+        if self.main_menu_tick == 1:
+            self.main_menu_speaker = py_sprites.Speaker()
+            self.entities["players"].append(self.main_menu_speaker.summon(target_row=config.MAX_ROW-3,target_col=2, screen=self.screen))
+        
+        self.main_menu_speaker.sync_sprite_with_volume()
+        
+        # Demo
         for entity in self.entitiesAllReturn():
             entity.ticker()
             if hasattr(entity, "_do_task_demo"):
@@ -317,26 +337,62 @@ class ClientGame:
         # Determine actions made by the user's key presses
         if now - self.menu_input_epoch > self.menu_input_cooldown:
 
+            # Check if we need to save settings or not.
+            settingsChanged = False 
+
             if inputManager.get_action("up", keys):
-                soundMixer.play("scroll", "audio/scroll.ogg")
+                soundMixer.play("scroll", "audio/scroll.ogg",vol_mult=self.game_volume)
                 self.menu_index = (self.menu_index - 1) % len(self.menu_items)
                 self.menu_input_epoch = now
 
             elif inputManager.get_action("down", keys):
-                soundMixer.play("scroll", "audio/scroll.ogg")
+                soundMixer.play("scroll", "audio/scroll.ogg",vol_mult=self.game_volume)
                 self.menu_index = (self.menu_index + 1) % len(self.menu_items)
                 self.menu_input_epoch = now
 
             elif inputManager.get_action("select", keys):
-                soundMixer.play("select", "audio/select.ogg")
+                self.menu_input_epoch = now
+                soundMixer.play("select", "audio/select.ogg",vol_mult=self.game_volume)
                 action = self.menu_actions.get(self.menu_items[self.menu_index])
                 if action:
                     action()
                     self.menu_input_epoch = now + 0.1
                     self.lobby_input_epoch = now + 0.1 # prevents the user from accidentally falling into a lobby
                     return
+            
+            # Volume
+            elif inputManager.get_action("vol-down",keys):
+                soundMixer.play("bonk", f"audio/bonk{randint(1,2)}.ogg",vol_mult=self.game_volume)
+                # Save new volume
+                new_sound_volume = round( max(0, self.game_volume - .1), 1)
+                config.redefine(volume=new_sound_volume)
+                self.game_volume = new_sound_volume
 
-        self.renderMenuText()
+                # update menu input epoch
+                self.menu_input_epoch = now
+
+                # flag the change
+                settingsChanged = True
+            elif inputManager.get_action("vol-up",keys):
+                soundMixer.play("bonk", f"audio/bonk{randint(1,2)}.ogg",vol_mult=self.game_volume)
+                # Save new volume
+                new_sound_volume = round( min(1.0, self.game_volume + .1), 1)
+                config.redefine(volume=new_sound_volume)
+                self.game_volume = new_sound_volume
+
+                # update epoch
+                self.menu_input_epoch = now
+
+                # flag change
+                settingsChanged = True
+
+            
+            if settingsChanged:
+                # save settings
+                self.saveGameSettings()
+
+
+        self.renderMenuText(volume=self.game_volume)
 
     # ========================================================
     # Online Connect / Waiting
@@ -365,7 +421,7 @@ class ClientGame:
 
         # If the player is connected online, redirect to lobby menu
         if self.net_connected:
-            soundMixer.play("connection_connected", "audio/connection_connected.ogg")
+            soundMixer.play("connection_connected", "audio/connection_connected.ogg",vol_mult=self.game_volume)
             self.net_out.put(json.dumps({"type": "list_lobbies"}))
             self.mode = "lobby"
             return
@@ -407,7 +463,7 @@ class ClientGame:
 
             self.entities["ui"] = render_text(
                  "``SERVER IS COLD BOOTING``"
-                f"``THIS MAY TAKE UP TO {self.net_rendercom_timeout} SECONDS`BUT USUALLY TAKES 60s`"
+                f"``THIS MAY TAKE UP TO {self.net_rendercom_timeout} SECONDS.`BUT USUALLY TAKES 60`"
                 f"{elapsed_net_out_colour}({self.net_rendercom_timeout-elapsed})&`{self.dots}```#You're the only player online.`thanks for playing my game!"
             )
 
@@ -455,7 +511,7 @@ class ClientGame:
             self.net_is_rate_limited = ("rate_limited" in msg_type)
             if self.net_is_rate_limited_prev != self.net_is_rate_limited:
                 self.net_is_rate_limited_prev = self.net_is_rate_limited
-                soundMixer.play("connection_rl", "audio/connection_rl.ogg")
+                soundMixer.play("connection_rl", "audio/connection_rl.ogg",vol_mult=self.game_volume)
             print(self.net_is_rate_limited)
 
             # --- Check for lobby assoicated things ---
@@ -471,9 +527,9 @@ class ClientGame:
                     self.lobby_name = msg.get("name")
 
                     if self.lobby_id and self.lobby_name:
-                        soundMixer.play("lobby_create", "audio/lobby_create.ogg")
+                        soundMixer.play("lobby_create", "audio/lobby_create.ogg",vol_mult=self.game_volume)
                     else:
-                        soundMixer.play("lobby_leave", "audio/lobby_leave.ogg")
+                        soundMixer.play("lobby_leave", "audio/lobby_leave.ogg",vol_mult=self.game_volume)
 
                 elif msg_type == "start_game":
                     self.mode = "transON-init"
@@ -503,17 +559,17 @@ class ClientGame:
             
 
             if inputManager.get_action("up", keys):
-                soundMixer.play("scroll", "audio/scroll.ogg")
+                soundMixer.play("scroll", "audio/scroll.ogg",vol_mult=self.game_volume)
                 self.lobby_index = max(0, self.lobby_index - 1)
                 self.lobby_input_epoch = now
 
             elif inputManager.get_action("down", keys):
-                soundMixer.play("scroll", "audio/scroll.ogg")
+                soundMixer.play("scroll", "audio/scroll.ogg",vol_mult=self.game_volume)
                 self.lobby_index = min(len(self.lobbies) - 1, self.lobby_index + 1)
                 self.lobby_input_epoch = now
 
             elif inputManager.get_action("select", keys):
-                soundMixer.play("scroll", "audio/scroll.ogg")
+                soundMixer.play("scroll", "audio/scroll.ogg",vol_mult=self.game_volume)
                 if not self.lobby_id:
                     # Prevent an index in empty 'self.lobbies[]' crash
                     if len(self.lobbies) == 0:
@@ -713,8 +769,7 @@ class ClientGame:
         # Sound timing (every half batch)
         if self.transOFF_tick % (CELLS_PER_FRAME // 2) == 0:
             self.trans_sfx_interval += 1
-            soundMixer.set_volume("transition", .1)
-            soundMixer.play("transition", "audio/transition.ogg")
+            soundMixer.play("transition", "audio/transition.ogg",vol_mult=self.game_volume*0.1)
 
 
 
@@ -818,7 +873,7 @@ class ClientGame:
 
         if self.playOFF_began:
             self.playOFF_began = False
-            soundMixer.play("initial_velocity", f"audio/initial_velocity.ogg")
+            soundMixer.play("initial_velocity", f"audio/initial_velocity.ogg",vol_mult=self.game_volume)
 
         # Update the player
         for entity60 in self.entities["players"]:
@@ -845,7 +900,7 @@ class ClientGame:
                     # Successful hit, but check owner to prevent multiple hit registrations
                     if not ball.owner or ball.owner != player:
                         print(ball.owner, "hit by", player)
-                        soundMixer.play("bonk", f"audio/bonk{randint(1,2)}.ogg")
+                        soundMixer.play("bonk", f"audio/bonk{randint(1,2)}.ogg",vol_mult=self.game_volume)
                         ball.owner = player
                         ball.set_velocity_basedOnPlayerMotion(player)
             
@@ -865,11 +920,11 @@ class ClientGame:
                     goal_name = goal.__class__.__name__
                     if "Left" in goal_name:
                         self.game_scores[2] += 1
-                        soundMixer.play("goal_opponent", "audio/scored_opponent.ogg")
+                        soundMixer.play("goal_opponent", "audio/scored_opponent.ogg",vol_mult=self.game_volume)
                         ball.set_velocity(-1,0) # reset, set velocity toward Left player
                     elif "Right" in goal_name:
                         self.game_scores[0] += 1
-                        soundMixer.play("goal_client", "audio/scored_client.ogg")
+                        soundMixer.play("goal_client", "audio/scored_client.ogg",vol_mult=self.game_volume)
                         ball.set_velocity(1,0) # reset, set velocity toward Right player
 
                     # Check which goal belongs
@@ -881,7 +936,7 @@ class ClientGame:
             #     ball.set_velocity(-ball.velocity_x, ball.velocity_y)
             if ball.sprite_rect.top <= 0 or ball.sprite_rect.bottom >= config.res_y:
                 # print("edging!")
-                soundMixer.play("initial_velocity", f"audio/initial_velocity.ogg")
+                soundMixer.play("initial_velocity", f"audio/initial_velocity.ogg",vol_mult=self.game_volume)
                 ball.set_velocity(ball.velocity_x, -ball.velocity_y)
 
         
@@ -911,7 +966,7 @@ class ClientGame:
 
     def initLostConnectionMenu(self):
         self.net_lost_tick = 0
-        soundMixer.play("connection_lost", "audio/connection_lost.ogg")
+        soundMixer.play("connection_lost", "audio/connection_lost.ogg",vol_mult=self.game_volume)
         self.entities["ui"].clear()
         self.mode = "lost"
         
@@ -944,9 +999,7 @@ class ClientGame:
 
         # load UI setting
         saveGameSettings = os.path.exists("game_settings.txt")
-        if saveGameSettings:
-            self.loadGameSettings()
-        else:
+        if not saveGameSettings:
             config.redefine(scale=config.calculate_best_fit_scale(self.desktop_res_x, self.desktop_res_y))
             self.saveGameSettings()
 
@@ -1043,28 +1096,42 @@ class ClientGame:
         return collided
     
     # -- File game setting
-    def saveGameSettings(self, override_scale=None):
+    def saveGameSettings(self, override_scale=None, override_volume=None):
         scale = override_scale if override_scale is not None else config.resolution_scale
-        with open(gamesettings_filename,"w") as f:
+        volume = override_volume if override_volume is not None else config.volume_multiplier
+
+        with open(gamesettings_filename, "w") as f:
             f.write(f"window_scale={scale}\n")
-        f.close()
+            f.write(f"volume={volume}\n")
+
     
     def loadGameSettings(self):
-        with open(gamesettings_filename,"r") as f:
-            lines = f.readlines()
-            for line in lines:
-                if "window_scale=" in line:
-                    scale = int(line.replace("window_scale=","").strip())
-                    config.redefine(scale=scale)
-                    break
-        f.close()
+        try:
+            with open(gamesettings_filename, "r") as f:
+                lines = f.readlines()
+                for line in lines:
+                    if line.startswith("window_scale="):
+                        scale = int(line.replace("window_scale=", "").strip())
+                        config.redefine(scale=scale)
+
+                    elif line.startswith("volume="):
+                        volume = float(line.replace("volume=", "").strip())
+                        config.redefine(volume=volume)
+                        self.game_volume = config.volume_multiplier # Sets from CONFIG
+        except:
+            print("We think the settings got corrupted, making a new one.")
+            self.saveGameSettings()
+            self.loadGameSettings()
+
 
     # ========================================================
     # UI Rendering
     #region UI
 
-    def renderMenuText(self):
-        title = "`````````````&"
+    def renderMenuText(self, volume=None):
+
+        volume = f"@VOL& {volume:.1f}" if volume is not None and debug == True else "`"
+        title = f"{volume}````````````&"
         body = ""
 
         for i, item in enumerate(self.menu_items):

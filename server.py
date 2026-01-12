@@ -13,6 +13,13 @@ clients: dict[WebSocket, dict] = {}
 lobbies: dict[str, dict] = {}
 
 # -----------------------------
+# SERVER SETTINGS
+# -----------------------------
+
+LOBBY_RATE_LIMIT_REFRESH_S = 30
+LOBBY_RATE_LIMIT_CAP = 15
+
+# -----------------------------
 # Helpers
 # -----------------------------
 
@@ -100,7 +107,7 @@ async def websocket_endpoint(ws: WebSocket):
         "lobby": None,
         # rl = Rate limit
         "rlLobbyRequestTime": time.time(),
-        "rlLobbyRequestPastMinute": 0,
+        "rlLobbyRequestCount": 0,
     }
 
     try:
@@ -117,20 +124,20 @@ async def websocket_endpoint(ws: WebSocket):
             now = time.time()
 
             # -- Clear slate every 30 seconds
-            if now - clients[ws]["rlLobbyRequestTime"] >= 30:
+            if now - clients[ws]["rlLobbyRequestTime"] >= LOBBY_RATE_LIMIT_REFRESH_S:
                 clients[ws]["rlLobbyRequestTime"] = now
-                clients[ws]["rlLobbyRequestPastMinute"] = 0
+                clients[ws]["rlLobbyRequestCount"] = 0
 
             # -- Reject user if too many lobby requests
-            if clients[ws]["rlLobbyRequestPastMinute"] >= 10:
+            if clients[ws]["rlLobbyRequestCount"] >= LOBBY_RATE_LIMIT_CAP:
                 await reject_request()
                 continue
             else:
-                clients[ws]["rlLobbyRequestPastMinute"] += 1
+                clients[ws]["rlLobbyRequestCount"] += 1
 
             
 
-            print(clients[ws]["rlLobbyRequestPastMinute"],clients[ws]["rlLobbyRequestPastMinute"])
+            print(clients[ws]["rlLobbyRequestCount"],clients[ws]["rlLobbyRequestCount"])
 
             # -----------------------------
             # LIST LOBBIES

@@ -21,7 +21,9 @@ class Config:
         self.frame_rate = framerate
         self.clock = pygame.time.Clock()
 
-    def redefine(self, scale=None, framerate=None, clock=None):
+        self.volume_multiplier = 1
+
+    def redefine(self, scale=None, framerate=None, clock=None, volume=None):
         """
         Redefine global configuration values. When `scale` is provided we update
         the derived resolution values but DO NOT mutate `last_resolution_scale` here.
@@ -46,6 +48,8 @@ class Config:
         if clock is not None:
             self.clock = clock
             return clock
+        if volume is not None:
+            self.volume_multiplier = volume
     
     def calculate_scale_against_pc_resolution(self, desktop_res_x, desktop_res_y) -> int:
         """

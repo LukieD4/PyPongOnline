@@ -32,7 +32,9 @@ INPUT_MODES = {
     "menu": {
         "up": ["K_UP", "K_w"],
         "down": ["K_DOWN", "K_s"],
-        "select": InputManager.universal_select()  # Use class method, not instance
+        "select": InputManager.universal_select(),  # Use class method, not instance
+        "vol-down": ["K_LEFT","K_a"],
+        "vol-up": ["K_RIGHT", "K_d"],
     },
     "lobby": {
         "up": ["K_UP", "K_w"],

@@ -140,6 +140,11 @@ class Sprite:
         Ensure we use the same loading path as set_sprite so tint and surface_original are consistent.
         """
 
+        # Check if a screen has been assigned (doesn't apply to ui sprites as they render on an independent layer)
+        if not screen and (not hasattr(self, 'team') or self.team != "ui"):
+            print(f"⚠️  No `screen` arg has been passed to {self.__class__.__name__}'s `Summon`, the sprite will not be visible.")
+
+
         # --- OFFSET RESOLUTION ---
         # If offsets are provided, use them; otherwise fall back to the object's defaults
         ox = offset_x*config.resolution_scale if offset_x is not None else self.POS_X_OFFSET
@@ -414,6 +419,44 @@ class Logo(Sprite):
     def __init__(self):
         super().__init__()
         self.spritesheet = [[sprites_dir / "logo0.png"]]
+
+
+
+
+
+#region Speaker
+class Speaker(Sprite):
+    def __init__(self):
+        super().__init__()
+        self.spritesheet = [[sprites_dir / "volume" / "0.png",
+                             sprites_dir / "volume" / "1.png",
+                             sprites_dir / "volume" / "2.png",
+                             sprites_dir / "volume" / "3.png",
+                             sprites_dir / "volume" / "4.png",
+                             sprites_dir / "volume" / "5.png",
+                             sprites_dir / "volume" / "6.png",
+                             sprites_dir / "volume" / "7.png",
+                             sprites_dir / "volume" / "8.png",
+                             sprites_dir / "volume" / "9.png",
+                             sprites_dir / "volume" / "10.png"]]
+        self.sprite_index = 2
+        self.set_sprite(0,self.sprite_index)
+    
+    def sync_sprite_with_volume(self):
+        # volume_multiplier is between 0 and 1
+        vol = config.volume_multiplier
+
+        # Map 0–1 range to 0–4 sprite index
+        # Multiply by number of sprites, subtract 1 because index starts at 0
+        index = int(vol * (len(self.spritesheet[0]) - 1))
+
+        # Clamp just in case
+        index = max(0, min(index, len(self.spritesheet[0]) - 1))
+
+        # Update sprite
+        self.sprite_index = index
+        self.set_sprite(0, self.sprite_index)
+
 
 
 
