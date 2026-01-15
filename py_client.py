@@ -72,8 +72,8 @@ def set_always_on_top():
 class ClientGame:
 
     def __init__(self):
-        # self.uri = "wss://pypongonline.onrender.com/ws"
-        self.uri = "ws://localhost:8000/ws" # local testing, comment out for production
+        self.uri = "wss://pypongonline.onrender.com/ws"
+        # self.uri = "ws://localhost:8000/ws" # local testing, comment out for production
     
 
         # --- entities ---
@@ -857,7 +857,7 @@ class ClientGame:
         self.playOFF_draw_line = False
         self.playOFF_drawn_lines = 0
         self.playOFF_began = False
-        
+
         self.game_halt_for_x_ticks = 0
         self.game_goal_scored = False
         self.game_scores = [0,0,0,0]
