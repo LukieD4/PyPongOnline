@@ -374,9 +374,8 @@ class Sprite:
                     self.oscillate_sprite()
                     self.move_position(dx=self._demo_x,dy=0)
     
-    def task_queryIsOutOfBounds(self):
-        grid_coords = pixel_to_grid(self.pos_x,self.pos_y)
-        return grid_coords["col"] > config.MAX_COL or grid_coords["col"] < 1 or grid_coords["row"] > config.MAX_ROW or grid_coords["row"] < 2
+    def query_isOffscreen(self):
+        return self.pos_col > config.MAX_COL or self.pos_col < 1 or self.pos_row > config.MAX_ROW or self.pos_row < -1
 
     def task(self):
         pass
@@ -509,6 +508,7 @@ class Dummy(Sprite):
         self.pos_motion_mult = 0
         self.pos_desync_calc = 0
         self.speed = 2
+        self.SPEED_INITIAL = self.speed
         self.client = True
 
 #region Player
@@ -563,17 +563,19 @@ class CPUPlayer(Dummy):
         self.sprite_index = 2
         
     
-    def task(self, ball: Ball):
+    def task(self, ball: Ball, skip_approaching=False):
         # Only react if ball is approaching
-        ball_approaching = ball.velocity_x > 0
-        if not ball_approaching:
-            return
+        # Skip: if ball_approaching doesn't exist
+        if not skip_approaching:
+            ball_approaching = ball.velocity_x > 0
+            if not ball_approaching:
+                return
 
         # Vertical difference
         dy_to_ball = ball.pos_y - self.pos_y
 
         # Deadzone to avoid jitter
-        DEADZONE = 4
+        DEADZONE = self.speed+4
         if abs(dy_to_ball) < DEADZONE:
             return
 
@@ -598,6 +600,13 @@ class CPUPlayer(Dummy):
         # Track movement every X ticks
         if self.tick % 30 == 0:
             self.pos_y_prev = self.pos_y
+    
+    def _do_task_demo(self, ball):
+        if self.tick or randint(0,2) == 1:
+            self.speed = randint(self.SPEED_INITIAL,self.SPEED_INITIAL+3)
+        
+        if randint(0,1) == 0:
+            self.task(ball, skip_approaching=True)
         
 
 
@@ -618,6 +627,7 @@ class Ball(Sprite):
         # Flags
         self.gotScored = False
         self.mark_for_respawn = False
+        self.edge_collision_buffer_ignore = 0 # frames
 
         # Initial velocity
         self.velocity_x = -1
@@ -631,6 +641,11 @@ class Ball(Sprite):
 
         # Owner tracking
         self.owner = None  # which player last hit the ball
+    
+    def ticker(self):
+        super().ticker()
+        if self.edge_collision_buffer_ignore > 0:
+            self.edge_collision_buffer_ignore -= 1
 
     def task(self) -> None:
         # --- movement ---
@@ -666,9 +681,25 @@ class Ball(Sprite):
         if velocity_y is not None:
             self.velocity_y = velocity_y
 
+        # Normalise vertical velocity
         mag = (self.velocity_x**2 + self.velocity_y**2) ** 0.5
         if mag != 0:
             self.velocity_x = (self.velocity_x / mag) * self.current_speed
             self.velocity_y = (self.velocity_y / mag) * self.current_speed
 
         return self.velocity_x, self.velocity_y
+    
+    def redirect_if_on_edge(self, soundMixer, soundVolumeOverride=1):
+        if self.edge_collision_buffer_ignore <= 0:
+            if (self.sprite_rect.top <= 0 or self.sprite_rect.bottom >= config.res_y):
+                self.edge_collision_buffer_ignore = 5
+                soundMixer.play("initial_velocity", f"audio/initial_velocity.ogg",vol_mult=config.volume_multiplier*soundVolumeOverride)
+                self.set_velocity(self.velocity_x, -self.velocity_y)
+    
+    def respawn(self):
+        super().respawn()
+        self.owner = None
+        
+    
+    def _do_task_demo(self):
+        self.task()

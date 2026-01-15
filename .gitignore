@@ -215,3 +215,4 @@ dist_lto/
 dist_upx/
 build_linux/
 build_windows/
+py_client copy.py

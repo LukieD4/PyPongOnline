@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import pygame, os, time, asyncio, websockets, queue, threading, json, sys
 
 import py_sprites
@@ -12,6 +14,7 @@ from py_soundmixer import soundMixer
 from socket import gethostname
 from hashlib import sha256
 from random import randint
+
 
 
 
@@ -63,15 +66,15 @@ def set_always_on_top():
         user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
                             SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW)
     except Exception as e:
-        print(f"Warning: Could not set always on top: {e}")
+        print(f"set_always_on_top : WARN : Could not set always on top: {e}")
 
 
 class ClientGame:
 
     def __init__(self):
-        self.uri = "wss://pypongonline.onrender.com/ws"
-        # self.uri = "ws://localhost:8000/ws" # local testing, comment out for production
-
+        # self.uri = "wss://pypongonline.onrender.com/ws"
+        self.uri = "ws://localhost:8000/ws" # local testing, comment out for production
+    
 
         # --- entities ---
         self.entities = {
@@ -110,8 +113,8 @@ class ClientGame:
         self.menu_index = 0
         self.menu_items = ["SOLO", "ONLINE", "SCREEN", "QUIT"]
         self.menu_actions = {
-            "SOLO": self.action_initOfflineFromMainMenu,
-            "ONLINE": self.action_initOnlineFromMainMenu,
+            "SOLO": self.action_playOffline,
+            "ONLINE": self.action_playOnline,
             "SCREEN": self.action_screen,
             "QUIT": self.action_quit,
         }
@@ -124,11 +127,10 @@ class ClientGame:
         self.mainloop_halt_for_x_ticks = 0
 
         # Transition
-        self.transON_tick = 0
-        self.transOFF_tick = 0
-        self.trans_sfx_interval = 0
-        self.trans_spawned_cols = 0
-        self.trans_spawned_rows = 0
+        self.transition_tick = 0
+        self.transition_sfx_interval = 0
+        self.transition_spawned_cols = 0
+        self.transition_spawned_rows = 0
 
         # Playing offline
         self.playOFF_tick = 0
@@ -163,9 +165,15 @@ class ClientGame:
         self.net_is_rate_limited = False
         self.net_is_rate_limited_prev = False
 
-        # Online / Lobby
+        # Online
         self.online_tick = 0
+        self.online_connect_tick = 0
+        self.online_waiting_tick = 0
+        self.online_offline_tick = 0
+
+        # Lobby
         self.lobbies = []
+        self.lobby_browser_tick = 0
         self.lobby_index = 0
         self.lobby_input_epoch = 0
         self.lobby_id, self.lobby_name = None, None
@@ -185,19 +193,28 @@ class ClientGame:
             # "menu": self.updateOfflineGame, # comment out later
 
             # online
+            "online-connect-init": self.initOnlineConnect,
             "online-connect": self.updateOnlineConnect,
+
+            "online-waiting-init": self.initOnlineWaiting,
             "online-waiting": self.updateOnlineWaiting,
+
+            "online-offline-init": self.initOnlineOffline,
             "online-offline": self.updateOnlineOffline,
-            "lobby": self.updateLobbyBrowser,
+
+            "lobby-browser-init": self.initLobbyBrowser,
+            "lobby-browser": self.updateLobbyBrowser,
+
+            "online-game-init": self.initOnlineGame,
             "online-game": self.updateOnlineGame,
 
             # offline
-            "offline-init": self.initTransToPlayOffline,
+            "offline-game-init": self.initOfflineGame,
             "offline-game": self.updateOfflineGame,
 
             # trans
             "transON-init": self.initTransToPlayOnline,
-            "transOFF-init": self.initTransToPlayOffline,
+            "transOFF-init": lambda:self.renderTransition(new_mode="offline-game-init"),
 
             # lost connection
             "lost-init": self.initLostConnectionMenu,
@@ -215,7 +232,7 @@ class ClientGame:
                 self.net_connected = True
                 self.net_wasConnected = True
                 self.net_last_error = None  # <<< clear stale failures
-                print("DEBUG: connected to server")
+                print(f"websocket_loop : DEBUG : connected to server")
 
                 await ws.send("Hello from client")
 
@@ -237,7 +254,7 @@ class ClientGame:
         except Exception as e:
             # Capture error for main thread to interpret
             self.net_last_error = str(e).lower()
-            print("DEBUG: websocket error:", self.net_last_error)
+            print(f"websocket_loop : DEBUG : websocket error (self.net_last_error) :", self.net_last_error)
 
         finally:
             # Socket is definitively closed here
@@ -282,18 +299,20 @@ class ClientGame:
     # Menu Actions
     #region Actions
 
-    def action_initOnlineFromMainMenu(self):
+    def action_playOnline(self):
+        # reset ticks
+        self.online_tick = 0
+
         # reset lobby state
         self.lobby_id = None
         self.lobby_name = None
         self.lobby_index = 0
 
         # switch mode
-        self.mode = "online-connect"
-        self.online_tick = 0
+        self.mode = "online-connect-init" # -> self.updateOnlineConnect
         self.start_network()
     
-    def action_initOfflineFromMainMenu(self):
+    def action_playOffline(self):
         # switch mode
         self.mode = "transOFF-init"
         self.transOFF_tick = 0
@@ -314,6 +333,7 @@ class ClientGame:
 
     def initMainMenu(self):
         self.main_menu_tick = 0
+        self.entitiesAllDelete()
         self.mode = "menu"
 
     def updateMainMenu(self):
@@ -324,15 +344,53 @@ class ClientGame:
         # Volume sprites
         if self.main_menu_tick == 1:
             self.main_menu_speaker = py_sprites.Speaker()
-            self.entities["players"].append(self.main_menu_speaker.summon(target_row=config.MAX_ROW-3,target_col=2, screen=self.screen))
+
+            # Volume sprite
+            self.entities["decor"].append(self.main_menu_speaker.summon(target_row=config.MAX_ROW-3,target_col=2, screen=self.screen))
+
+            # Generate demo sprites
+            self.entities["ai"].append(py_sprites.CPUPlayer().summon(target_row=5,target_col=config.MAX_COL-2,initial_sprite_index=2,screen=self.screen))
+            self.entities["ai"].append(py_sprites.CPUPlayer().summon(target_row=5,target_col=2,initial_sprite_index=0,screen=self.screen))
+
+            self.entities["balls"].append(py_sprites.Ball().summon(target_col=config.MAX_COL//2, target_row=5, screen=self.screen))
+            # self.entities["balls"][0].set_velocity(1,0)
         
         self.main_menu_speaker.sync_sprite_with_volume()
         
-        # Demo
+        # --- Demo gameplay ---
         for entity in self.entitiesAllReturn():
             entity.ticker()
             if hasattr(entity, "_do_task_demo"):
-                entity._do_task_demo()
+                if "CPU" in entity.__class__.__name__:
+                    entity._do_task_demo(self.entities["balls"][0])
+                else:
+                    entity._do_task_demo()
+            
+
+            # Collision check demo
+            for ball in self.entities["balls"]:
+                # -- Ball v. Player
+                for player in self.entities["ai"]:
+                    if self.check_collision(ball.sprite_rect, player.sprite_rect):
+
+                        # Successful hit, but check owner to prevent multiple hit registrations
+                        if not ball.owner or ball.owner != player:
+                            print(f"updateMainMenu: {ball.owner} hit by {player}")
+                            soundMixer.play("bonk", f"audio/bonk{randint(1,2)}.ogg",vol_mult=self.game_volume)
+                            ball.owner = player
+                            ball.set_velocity_basedOnPlayerMotion(player)
+            
+            # Check screen edge for ball redirect
+            ball: py_sprites.Ball
+            for ball in self.entities["balls"]:
+                ball.redirect_if_on_edge(soundMixer=soundMixer,soundVolumeOverride=0)
+                if ball.query_isOffscreen() and ball.edge_collision_buffer_ignore > 0:
+                    ball.respawn()
+                    
+                    inverse = -1 if randint(0,1) == 0 else 1
+                    ball.set_velocity(velocity_x=1*inverse,velocity_y=1*inverse)
+            
+        # --- --- --- --- --- --- --- --- --- --- --- --- #
 
         # Determine actions made by the user's key presses
         if now - self.menu_input_epoch > self.menu_input_cooldown:
@@ -356,6 +414,7 @@ class ClientGame:
                 action = self.menu_actions.get(self.menu_items[self.menu_index])
                 if action:
                     action()
+                    self.entities["decor"].clear() # clears the Speaker sprite
                     self.menu_input_epoch = now + 0.1
                     self.lobby_input_epoch = now + 0.1 # prevents the user from accidentally falling into a lobby
                     return
@@ -397,15 +456,20 @@ class ClientGame:
     # ========================================================
     # Online Connect / Waiting
     #region OnlineConnect
+    def initOnlineConnect(self):
+        self.online_connect_tick = 0
+        self.entitiesAllDelete()
+        self.mode = "online-connect"
 
     def updateOnlineConnect(self):
-        self.online_tick += 1
+        self.online_connect_tick += 1
 
         # Escalate into cold-boot waiting state
         if self.has_handshake_timeout():
             self.net_connected_epoch = time.time()
             self.net_last_epoch_attempt = 0
-            self.mode = "online-waiting"
+            self.mode = "online-waiting" # -> self.updateOnlineWaiting
+            
             return
         
         # Dev: the user forgot to launch their server
@@ -415,20 +479,20 @@ class ClientGame:
             
 
         # Defer to only every 30 frames, (2 times a second)
-        if self.online_tick % 30 == 0:
+        if self.online_connect_tick % 30 == 0:
             self.ui_ellipse += 1
             self.dots = "." * ((self.ui_ellipse % 3) + 1)
 
-        # If the player is connected online, redirect to lobby menu
+        # If the player is ALREADY CONNECTED online, redirect to lobby menu
         if self.net_connected:
             soundMixer.play("connection_connected", "audio/connection_connected.ogg",vol_mult=self.game_volume)
             self.net_out.put(json.dumps({"type": "list_lobbies"}))
-            self.mode = "lobby"
+            self.mode = "lobby-browser" # -> self.updateLobbyBrowser
             return
 
         # Failsafe: eject to lost connection menu after timeout
-        if self.online_tick >= config.frame_rate * self.net_timeout/2:
-            self.mode = "lost-init"
+        if self.online_connect_tick >= config.frame_rate * self.net_timeout/2:
+            self.mode = "lost-init" # -> self.updateLost
             return
 
         self.entities["ui"] = render_text(
@@ -436,9 +500,15 @@ class ClientGame:
         )
 
     #region OnlineWaiting
+    def initOnlineWaiting(self):
+        self.online_waiting_tick = 0
+        self.entitiesAllDelete()
+        self.mode = "online-waiting"
+
+
     def updateOnlineWaiting(self):
         # duplicate tick so we can reuse ellipse dotting
-        self.online_tick += 1
+        self.online_waiting_tick += 1
 
         # SUCCESS: connection established while waiting
         if self.net_connected:
@@ -447,14 +517,14 @@ class ClientGame:
             self.net_last_epoch_attempt = 0
 
             self.net_out.put(json.dumps({"type": "list_lobbies"}))
-            self.mode = "lobby"
+            self.mode = "lobby-browser" # -> self.updateLobbyBrowser
             return
 
         # capture epoch of connection (INTEGER) a bit hacky but works
         elapsed = int(f"{(time.time() - self.net_connected_epoch):.0f}")
 
         # Defer to every 30 frames, (2 times a second)
-        if self.online_tick % 30 == 0:
+        if self.online_waiting_tick % 30 == 0:
             self.ui_ellipse += 1
             self.dots = "." * ((self.ui_ellipse % 3) + 1)
 
@@ -477,7 +547,14 @@ class ClientGame:
                 self.mode = "online-offline"
 
     #region OnlineOffline
+    def initOnlineOffline(self):
+        self.online_offline_tick = 0
+        self.entitiesAllDelete()
+        self.mode = "online-offline"
+
     def updateOnlineOffline(self):
+        self.online_offline_tick += 1
+
         keys = pygame.key.get_pressed()
 
         self.entities["ui"] = render_text(
@@ -492,10 +569,17 @@ class ClientGame:
     # ========================================================
     # Lobby
     #region Lobby Browse
+    def initLobbyBrowser(self):
+        self.lobby_browser_tick = 0
+        self.entitiesAllDelete()
+        self.mode = "lobby-browser"
 
     def updateLobbyBrowser(self):
+        self.lobby_browser_tick += 1
+
         keys = pygame.key.get_pressed()
         now = time.time()
+
 
         while not self.net_in.empty():
             raw = self.net_in.get()
@@ -512,7 +596,7 @@ class ClientGame:
             if self.net_is_rate_limited_prev != self.net_is_rate_limited:
                 self.net_is_rate_limited_prev = self.net_is_rate_limited
                 soundMixer.play("connection_rl", "audio/connection_rl.ogg",vol_mult=self.game_volume)
-            print(self.net_is_rate_limited)
+            print(f"updateLobbyBrowser: net_is_rate_limited: {self.net_is_rate_limited}")
 
             # --- Check for lobby assoicated things ---
             if not self.net_is_rate_limited:
@@ -539,21 +623,27 @@ class ClientGame:
         if now - self.lobby_input_epoch > 0.2 and not self.mode in ["transON-init", "transOFF-init"]:
             
             # Run these always
-            if inputManager.get_action("create", keys) or inputManager.get_action("leave", keys):
-                if self.lobby_id and inputManager.get_action("leave", keys):
-                    self.net_out.put(json.dumps({"type": "leave_lobby"}))
-                else:
-                    self.net_out.put(json.dumps({
-                        "type": "create_lobby",
-                        "owner": self.client_id_hash
-                    }))
+            # print(f"updateLobbyBrowser: .get_action('create' : {inputManager.get_action("create", keys)} : .get_action('leave', keys) : {inputManager.get_action("leave", keys)}")
+            if inputManager.get_action("create", keys) and (not self.lobby_id) and (not self.net_is_rate_limited):
+                print(f"updateLobbyBrowser : creating lobby")
+                self.net_out.put(json.dumps({
+                    "type": "create_lobby",
+                    "owner": self.client_id_hash
+                }))
                 self.lobby_input_epoch = now
+            
+            elif inputManager.get_action("leave", keys) and (self.lobby_id) and (not self.net_is_rate_limited):
+                print(f"updateLobbyBrowser : checking input keys")
+                if self.lobby_id and inputManager.get_action("leave", keys):
+                    print(f"updateLobbyBrowser : leave lobby")
+                    self.net_out.put(json.dumps({"type": "leave_lobby"}))
+                    self.lobby_input_epoch = now
 
             elif inputManager.get_action("back", keys):
                 self.mode = "menu-init"
 
 
-            # !! Gatekeep any further actions if in a lobby !!
+            # !! Gatekeep any further actions if CLIENT IS IN A LOBBY !!
             elif self.lobby_id is not None:
                 return # <-- exit early
             
@@ -632,6 +722,8 @@ class ClientGame:
 
             ui_entities.pop(0)
 
+    def initOnlineGame(self):
+        self.mode = "online-game"
 
     def updateOnlineGame(self):
         # # UPDATE LOGIC: 60FPS
@@ -756,56 +848,32 @@ class ClientGame:
     # ========================================================
     # Offline Game
     # region OfflineGame
-    def initTransToPlayOffline(self):
-        self.transOFF_tick += 1
+    def initOfflineGame(self):
+        self.transition_tick = 0
 
-        # First-frame cleanup
-        if self.transOFF_tick == 1:
-            self.entitiesAllDelete()
+        # Playing offline
+        self.playOFF_tick = 0
+        self.playOFF_countdown_epoch = 0
+        self.playOFF_draw_line = False
+        self.playOFF_drawn_lines = 0
+        self.playOFF_began = False
+        
+        self.game_halt_for_x_ticks = 0
+        self.game_goal_scored = False
+        self.game_scores = [0,0,0,0]
+        self.mode = "offline-game"
 
-        CELLS_PER_FRAME = 14
-        ui_entities = self.entities["ui"]
-
-        # Sound timing (every half batch)
-        if self.transOFF_tick % (CELLS_PER_FRAME // 2) == 0:
-            self.trans_sfx_interval += 1
-            soundMixer.play("transition", "audio/transition.ogg",vol_mult=self.game_volume*0.1)
-
-
-
-        for _ in range(CELLS_PER_FRAME):
-
-            # Spawn phase
-            if self.trans_spawned_rows <= config.MAX_ROW:
-                ui_entities.append(
-                    py_sprites.Cell().summon(
-                        target_row=self.trans_spawned_rows,
-                        target_col=self.trans_spawned_cols,
-                        colour=(100, 100, 100),
-                        screen=self.screen
-                    )
-                )
-
-                # Advance grid position
-                self.trans_spawned_cols += 1
-                if self.trans_spawned_cols >= config.MAX_COL:
-                    self.trans_spawned_cols = 0
-                    self.trans_spawned_rows += 1
-                continue  # do not delete on the same iteration
-
-            # Delete phase
-            if not ui_entities:
-                # Transition complete
-                self.transition_frame_count = 0
-                self.mode = "offline-game"
-                self.trans_spawned_cols = 0
-                self.trans_spawned_rows = 0
-                return
-
-            ui_entities.pop(0)
+    
 
     
     def updateOfflineGame(self):
+        #Type hints
+        ball: py_sprites.Ball
+        entity: py_sprites.Sprite
+        entity60: py_sprites.Sprite
+        player: py_sprites.Player
+        goal: py_sprites.Goal
+
         # UPDATE LOGIC: 60FPS
         self.playOFF_tick += 1
         keys = pygame.key.get_pressed()
@@ -826,6 +894,12 @@ class ClientGame:
         # was the game halted because of a scored ball?
         if self.game_goal_scored:
             self.game_goal_scored = False
+
+            # - END GAME?
+            if 3 in self.game_scores:
+                self.game_verdict = "END"
+                self.mode = "menu-init"
+
             # - respawn balls
             for ball in self.entities["balls"]:
                 ball.gotScored = False
@@ -843,7 +917,6 @@ class ClientGame:
 
 
         # Tick all entities
-        entity60: py_sprites.Sprite
         for entity60 in self.entitiesAllReturn():
             entity60.ticker()
 
@@ -888,10 +961,6 @@ class ClientGame:
             entity60.task(self.entities["balls"][0])
         
         # Check collisions
-        goal: py_sprites.Goal
-        ball: py_sprites.Ball
-        player: py_sprites.Player
-
         for ball in self.entities["balls"]:
             # -- Ball v. Player
             for player in self.entities["players"]+self.entities["ai"]:
@@ -899,7 +968,7 @@ class ClientGame:
 
                     # Successful hit, but check owner to prevent multiple hit registrations
                     if not ball.owner or ball.owner != player:
-                        print(ball.owner, "hit by", player)
+                        print(f"updateOfflineGame: {ball.owner} hit by {player}")
                         soundMixer.play("bonk", f"audio/bonk{randint(1,2)}.ogg",vol_mult=self.game_volume)
                         ball.owner = player
                         ball.set_velocity_basedOnPlayerMotion(player)
@@ -911,6 +980,7 @@ class ClientGame:
                     
                     # Set flag
                     ball.gotScored = True
+
 
                     # Halt game (starts next frame)
                     self.game_halt_for_x_ticks = 180
@@ -928,16 +998,11 @@ class ClientGame:
                         ball.set_velocity(1,0) # reset, set velocity toward Right player
 
                     # Check which goal belongs
-                    print(goal.__class__.__name__)
+                    print(f"updateOfflineGame: goal.__class__.__name__ : {goal.__class__.__name__}")
         
         # Check screen edge for ball redirect
         for ball in self.entities["balls"]:
-            # if ball.sprite_rect.left <= 0 or ball.sprite_rect.right >= config.res_x:
-            #     ball.set_velocity(-ball.velocity_x, ball.velocity_y)
-            if ball.sprite_rect.top <= 0 or ball.sprite_rect.bottom >= config.res_y:
-                # print("edging!")
-                soundMixer.play("initial_velocity", f"audio/initial_velocity.ogg",vol_mult=self.game_volume)
-                ball.set_velocity(ball.velocity_x, -ball.velocity_y)
+            ball.redirect_if_on_edge(soundMixer=soundMixer)
 
         
         # -- debug, return ball back
@@ -967,7 +1032,7 @@ class ClientGame:
     def initLostConnectionMenu(self):
         self.net_lost_tick = 0
         soundMixer.play("connection_lost", "audio/connection_lost.ogg",vol_mult=self.game_volume)
-        self.entities["ui"].clear()
+        self.entitiesAllDelete()
         self.mode = "lost"
         
 
@@ -1033,7 +1098,7 @@ class ClientGame:
 
 
             # Mode dispatch
-            self.update_methods.get(self.mode, lambda: print(f"⚠️  Warning: No update method implemented for mode: {self.mode}"))()
+            self.update_methods.get(self.mode, lambda: print(f"main : ⚠️  Warning: No update method implemented for self.mode: {self.mode}"))()
 
             self.screen.fill((0, 0, 0))
             for entity in self.entitiesAllReturn():
@@ -1118,8 +1183,8 @@ class ClientGame:
                         volume = float(line.replace("volume=", "").strip())
                         config.redefine(volume=volume)
                         self.game_volume = config.volume_multiplier # Sets from CONFIG
-        except:
-            print("We think the settings got corrupted, making a new one.")
+        except Exception as e:
+            print(f"loadGameSettings : settings failed to load (outdated or corrupted? we make a new file instead) : {e}")
             self.saveGameSettings()
             self.loadGameSettings()
 
@@ -1127,6 +1192,55 @@ class ClientGame:
     # ========================================================
     # UI Rendering
     #region UI
+
+    def renderTransition(self,new_mode):
+        self.transition_tick += 1
+
+        # First-frame cleanup
+        if self.transition_tick == 1:
+            self.entitiesAllDelete()
+
+        CELLS_PER_FRAME = 14
+        ui_entities = self.entities["ui"]
+
+        # Sound timing (every half batch)
+        if self.transition_tick % (CELLS_PER_FRAME // 2) == 0:
+            self.transition_sfx_interval += 1
+            soundMixer.play("transition", "audio/transition.ogg",vol_mult=self.game_volume*0.1)
+
+
+
+        for _ in range(CELLS_PER_FRAME):
+
+            # Spawn phase
+            if self.transition_spawned_rows <= config.MAX_ROW:
+                ui_entities.append(
+                    py_sprites.Cell().summon(
+                        target_row=self.transition_spawned_rows,
+                        target_col=self.transition_spawned_cols,
+                        colour=(100, 100, 100),
+                        screen=self.screen
+                    )
+                )
+
+                # Advance grid position
+                self.transition_spawned_cols += 1
+                if self.transition_spawned_cols >= config.MAX_COL:
+                    self.transition_spawned_cols = 0
+                    self.transition_spawned_rows += 1
+                continue  # do not delete on the same iteration
+
+            # Delete phase
+            if not ui_entities:
+                # Transition complete
+                self.transition_frame_count = 0
+                self.mode = new_mode
+                print(f"renderTransition : switching to new mode : {self.mode}")
+                self.transition_spawned_cols = 0
+                self.transition_spawned_rows = 0
+                return
+
+            ui_entities.pop(0)
 
     def renderMenuText(self, volume=None):
 
