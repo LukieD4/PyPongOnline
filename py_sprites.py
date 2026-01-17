@@ -36,7 +36,7 @@ class Sprite:
         self.tick = 0
 
         # sprite resources
-        self.spritesheet = []
+        self.spritesheet = [[sprites_dir / "missing.png"]]
         self.sprite_rect: pygame.Rect | None = None
         self.sprite_index = 0
         # don't tamper
@@ -56,7 +56,7 @@ class Sprite:
         self.surface_original: pygame.Surface | None = None
         self.surface_tinted_original: pygame.Surface | None = None
         self.surface_render: pygame.Surface | None = None
-        self.surface_tint_color: tuple[int,int,int] | None = None
+        self.surface_tint_colour: tuple[int,int,int] | None = None
 
         assert self.__SCALE >= 0.25, "resolution_scale must be greater than 0.25"
 
@@ -98,14 +98,14 @@ class Sprite:
 
         # Update tint if specified
         if tint is not None:
-            self.surface_tint_color = tint
+            self.surface_tint_colour = tint
 
         # Choose source: original or tint-original
-        if self.surface_tint_color is not None:
+        if self.surface_tint_colour is not None:
             # Build tinted original
             self.surface_tinted_original = self._tint_surface(
                 self.surface_original,
-                self.surface_tint_color
+                self.surface_tint_colour
             )
             source = self.surface_tinted_original
         else:
@@ -178,7 +178,7 @@ class Sprite:
 
         # If a colour was passed, stash it (so future animations/rescales reuse it)
         if colour is not None:
-            self.surface_tint_color = tuple(colour)
+            self.surface_tint_colour = tuple(colour)
         
         # Fallback to sprite's index if none
         if initial_sprite_index is None:
@@ -187,14 +187,14 @@ class Sprite:
         # Use set_sprite to load frame and apply tint/scaling logic consistently
         # NOW RESPECTS THE initial_sprite_index PARAMETER
         try:
-            self.set_sprite(0, initial_sprite_index, recolour=self.surface_tint_color)
+            self.set_sprite(0, initial_sprite_index, recolour=self.surface_tint_colour)
         except Exception:
             # fallback if spritesheet not available
             if self.spritesheet and self.spritesheet[0]:
                 raw = loadSprite([self.spritesheet[0][initial_sprite_index]])
                 self.surface_original = raw.convert_alpha()
-                if self.surface_tint_color is not None:
-                    self.surface_tinted_original = self._tint_surface(self.surface_original, self.surface_tint_color)
+                if self.surface_tint_colour is not None:
+                    self.surface_tinted_original = self._tint_surface(self.surface_original, self.surface_tint_colour)
                 source = self.surface_tinted_original if self.surface_tinted_original else self.surface_original
                 self.surface_render = self._build_render_surface(source)
 
@@ -272,24 +272,24 @@ class Sprite:
         # reset oscillator and surfaces
         self._sprite_oscillator = 0
         # reload initial frame using set_sprite to keep tint behaviour consistent
-        self.set_sprite(0, 0, recolour=self.surface_tint_color)
+        self.set_sprite(0, 0, recolour=self.surface_tint_colour)
     
     def set_sprite(self, anim_index: int, frame_index: int, recolour: tuple[int,int,int] | None = None):
         """
         Load frame from disk into surface_original, optionally recolour it and cache the tinted original.
         Then scale and set surface_render (the one surface used for drawing).
         """
-        # Update tint color if recolour explicitly provided
+        # Update tint colour if recolour explicitly provided
         if recolour is not None:
-            self.surface_tint_color = tuple(recolour)
+            self.surface_tint_colour = tuple(recolour)
 
         # Load raw frame
         raw = loadSprite([self.spritesheet[anim_index][frame_index]])
         self.surface_original = raw.convert_alpha()
 
         # If a tint colour exists, produce a tinted original; else clear it
-        if self.surface_tint_color is not None:
-            self.surface_tinted_original = self._tint_surface(self.surface_original, self.surface_tint_color)
+        if self.surface_tint_colour is not None:
+            self.surface_tinted_original = self._tint_surface(self.surface_original, self.surface_tint_colour)
             source = self.surface_tinted_original
         else:
             self.surface_tinted_original = None
@@ -318,9 +318,9 @@ class Sprite:
         raw = loadSprite([self.spritesheet[anim_index][frame_index]])
         self.surface_original = raw.convert_alpha()
 
-        # Reapply tint cache if we have tint_color
-        if self.surface_tint_color is not None:
-            self.surface_tinted_original = self._tint_surface(self.surface_original, self.surface_tint_color)
+        # Reapply tint cache if we have tint_colour
+        if self.surface_tint_colour is not None:
+            self.surface_tinted_original = self._tint_surface(self.surface_original, self.surface_tint_colour)
             source = self.surface_tinted_original
         else:
             self.surface_tinted_original = None

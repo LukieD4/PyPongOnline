@@ -1,13 +1,8 @@
-import pygame
+import pygame, threading, asyncio
 from pygame import joystick
 
-# Detect controllers
-pygame.joystick.init()
-controllers = [pygame.joystick.Joystick(i) for i in range(pygame.joystick.get_count())]
-for c in controllers:
-    c.init()
-
-CONTROLLER_BUTTON_MAP = {
+# Using Xbox's scheme!
+DEFAULT_CONTROLLER_BUTTON_MAP = {
     "a": 0,
     "b": 1,
     "x": 2,
@@ -22,6 +17,30 @@ CONTROLLER_BUTTON_MAP = {
     "dpad_right": 14,
 }
 
+CROSS_PLATFORM_SPRITE_MAP = {
+    # RESOLVES THE IMAGES (e.g. xbx_a.png)
+    "XBOX": {
+        "a": "xbx_a",
+        "b": "xbx_b",
+        "x": "xbx_x",
+        "y": "xbx_y",
+        "lb": "xbx_lb",
+        "rb": "xbx_rb",
+        "back": "xbx_back",
+        "start": "xbx_start",
+    },
+    "DUALSHOCK": {
+        "a": "psn_cross",
+        "b": "psn_circle",
+        "x": "psn_square",
+        "y": "psn_triangle",
+        "lb": "psn_l2",
+        "rb": "psn_r2",
+        "back": "psn_back",
+        "start": "psn_select",
+        },
+}
+
 CONTROLLER_AXIS_MAP = {
     "left_x": 0,
     "left_y": 1,
@@ -33,24 +52,119 @@ CONTROLLER_AXIS_MAP = {
 class InputManager:
     def __init__(self):
         self.mode = None  # updated externally in client.py main loop.
+
+        # Input method tracking
+        self.last_input_method = "Default" # Default: Keyboard & Mouse, "Xbox Series X Controller": Controller
+        
+        # Detect controllers
+        pygame.joystick.init()
+        self.controller_thread = None
+        self.controllers = []
+    
+    def resolve_active_input_method(self, event):
+        if (event.type == pygame.KEYDOWN) or event.type in (pygame.MOUSEBUTTONDOWN, pygame.MOUSEMOTION):
+            self.last_input_method = "Default"
+
+        elif event.type in (pygame.JOYBUTTONDOWN, pygame.JOYHATMOTION):
+            if self.controllers:
+                self.last_input_method = self.controllers[0].get_name()
+
+        elif event.type == pygame.JOYAXISMOTION:
+            if abs(event.value) > 0.5 and self.controllers:
+                self.last_input_method = self.controllers[0].get_name()
+
+
+    def get_controller_family(self):
+        if self.last_input_method == "Default":
+            return None
+
+        name = self.last_input_method.lower()
+        # name = "sony"
+
+        if "xbox" in name:
+            return "XBOX"
+
+        if ("dualshock" in name or 
+            "dual sense" in name or 
+            "dualsense" in name or 
+            "sony" in name or 
+            "wireless controller" in name):
+            return "DUALSHOCK"
+
+        return "XBOX"  # fallback for generic controllers
+
+
+    def get_sprite_for_keyboard_key(self, keyboard_key):
+        if self.last_input_method == "Default":
+            return None
+
+        button = self.translate_keyboard_key_to_controller_key(keyboard_key)
+        if button is None:
+            return None
+
+        family = self.get_controller_family()
+        if family is None:
+            return None
+
+        return CROSS_PLATFORM_SPRITE_MAP[family].get(button)
+
+
+
+    def translate_keyboard_key_to_controller_key(self, keyboard_key:str):
+        if self.mode not in INPUT_MODES:
+            return None
+        
+        # Santise to PyGame formatting
+        keyboard_key = keyboard_key.upper() if len(keyboard_key) > 1 else keyboard_key.lower()
+        keyboard_key = f"K_{keyboard_key}" if not keyboard_key.startswith("K_") else keyboard_key
+            
+
+        mode_map = INPUT_MODES[self.mode]
+
+        for action_name, key_list in mode_map.items():
+
+            if keyboard_key not in key_list:
+                continue
+
+            for key in key_list:
+                if callable(key) and hasattr(key, "__closure__") and key.__closure__:
+                    for cell in key.__closure__:
+                        val = cell.cell_contents
+                        if isinstance(val, str) and val in DEFAULT_CONTROLLER_BUTTON_MAP:
+                            return val
+
+            return None
+
+        return None
+
+
+
+    def get_latest_controllers(self):
+        while True:
+            self.controllers = [
+                pygame.joystick.Joystick(i)
+                for i in range(pygame.joystick.get_count())
+            ]
+            for c in self.controllers:
+                c.init()
+
+            pygame.time.wait(500)
+
+        
     
     def get_action(self, action_name, keys):
         if self.mode not in INPUT_MODES:
-            print(f"⚠️  InputManager: INPUT_MODES couldn't find a matching mode for '{self.mode}' (did you spell it correctly? In `client.py` and `input.py`?)")
+            print(f"⚠️  InputManager: INPUT_MODES couldn't find a matching mode for '{self.mode}'")
             return False
-
 
         key_list = INPUT_MODES[self.mode].get(action_name, [])
 
         for key in key_list:
-
-            # Keyboard key
             if isinstance(key, str):
                 key_const = getattr(pygame, key, None)
                 if key_const is not None and keys[key_const]:
                     return True
 
-            # Controller callable
             elif callable(key):
                 if key():
                     return True
@@ -71,16 +185,13 @@ class InputManager:
             for i in range(pygame.joystick.get_count()):
                 joy = pygame.joystick.Joystick(i)
 
-                # First try button map
-                if button_name in CONTROLLER_BUTTON_MAP:
-                    btn_index = CONTROLLER_BUTTON_MAP[button_name]
+                if button_name in DEFAULT_CONTROLLER_BUTTON_MAP:
+                    btn_index = DEFAULT_CONTROLLER_BUTTON_MAP[button_name]
                     if joy.get_button(btn_index):
                         return True
 
-                # Then try hat directions
                 if button_name.startswith("dpad_"):
                     hat_x, hat_y = joy.get_hat(0)
-                    # print(hat_x,hat_y) # returns 0,0 with no inputs
 
                     if button_name == "dpad_up" and hat_y == 1:
                         return True
@@ -120,6 +231,14 @@ class InputManager:
 
 # singleton instance
 inputManager = InputManager()
+
+inputManager.controller_thread = threading.Thread(
+    target=inputManager.get_latest_controllers,
+    daemon=True
+)
+inputManager.controller_thread.start()
+
+
 
 # Define input modes and their associated key actions
 INPUT_MODES = {

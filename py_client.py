@@ -190,6 +190,7 @@ class ClientGame:
             # menus
             "menu-init": self.initMainMenu,
             "menu": self.updateMainMenu,
+            # "menu": self.initLobbyBrowser,
             # "menu": self.updateOfflineGame, # comment out later
 
             # online
@@ -213,7 +214,7 @@ class ClientGame:
             "offline-game": self.updateOfflineGame,
 
             # trans
-            "transON-init": self.initTransToPlayOnline,
+            "transON-init": lambda:self.renderTransition(new_mode="online-game-init"),
             "transOFF-init": lambda:self.renderTransition(new_mode="offline-game-init"),
 
             # lost connection
@@ -644,8 +645,9 @@ class ClientGame:
 
 
             # !! Gatekeep any further actions if CLIENT IS IN A LOBBY !!
-            elif self.lobby_id is not None:
-                return # <-- exit early
+            # elif self.lobby_id is not None:
+            #     return # <-- exit early
+            # commented out: it gets in the way of controller mapping
             
 
             if inputManager.get_action("up", keys):
@@ -677,171 +679,29 @@ class ClientGame:
     # ========================================================
     # Online Game
     #region OnlineGame
-    def initTransToPlayOnline(self):
-        self.transON_tick += 1
-
-        # First-frame cleanup
-        if self.transON_tick == 1:
-            self.entitiesAllDelete()
-
-        CELLS_PER_FRAME = 14
-        ui_entities = self.entities["ui"]
-
-        # Sound timing (every half batch)
-        if self.transON_tick % (CELLS_PER_FRAME // 2) == 0:
-            self.trans_sfx_interval += 1
-            # soundManager.play(...)
-
-        for _ in range(CELLS_PER_FRAME):
-
-            # Spawn phase
-            if self.trans_spawned_rows <= config.MAX_ROW:
-                ui_entities.append(
-                    py_sprites.Cell().summon(
-                        target_row=self.trans_spawned_rows,
-                        target_col=self.trans_spawned_cols,
-                        screen=self.screen
-                    )
-                )
-
-                # Advance grid position
-                self.trans_spawned_cols += 1
-                if self.trans_spawned_cols >= config.MAX_COL:
-                    self.trans_spawned_cols = 0
-                    self.trans_spawned_rows += 1
-                continue  # do not delete on the same iteration
-
-            # Delete phase
-            if not ui_entities:
-                # Transition complete
-                self.transition_frame_count = 0
-                self.mode = "online-gamee"
-                self.trans_spawned_cols = 0
-                self.trans_spawned_rows = 0
-                return
-
-            ui_entities.pop(0)
-
     def initOnlineGame(self):
+        self.transition_tick = 0
+
+        # Playing offline
+        self.playOFF_tick = 0
+        self.playOFF_countdown_epoch = 0
+        self.playOFF_draw_line = False
+        self.playOFF_drawn_lines = 0
+        self.playOFF_began = False
+
+        self.game_halt_for_x_ticks = 0
+        self.game_goal_scored = False
+        self.game_scores = [0,0,0,0]
         self.mode = "online-game"
 
+
     def updateOnlineGame(self):
-        # # UPDATE LOGIC: 60FPS
-        # self.playON_tick += 1
-        # keys = pygame.key.get_pressed()
-
-        # # --- Setup on first frame ---
-        # if self.playON_tick == 1:
-
-        #     self.net_in.get()
-        #     self.playON_draw_line = True
-
-        #     # Load stage, auto assigns
-        #     self.entities = self.entitiesAppend(self.stager.load_stage(resource_path("stages/classic.stage")))
-
-
-        # # Draw one dash 12 times a second
-        # if self.playOFF_tick % 5 == 0 and self.playOFF_draw_line:
-        #     center_col = config.MAX_COL // 2
-        #     # spawn a single dash at the next row
-        #     dash_row = self.playOFF_drawn_lines % (config.RES_Y_INIT // 8)
-        #     self.entities["decor"].append(
-        #         sprites.Dashline().summon(
-        #             screen=self.screen,
-        #             target_col=center_col,
-        #             target_row=dash_row
-        #         )
-        #     )
-        #     if self.playOFF_drawn_lines >= 22:
-        #         self.playOFF_draw_line = False
-            
-        #     self.playOFF_drawn_lines += 1
-
-            
-        # # --- Game only starts once line has been drawn. ---
-        # if self.playOFF_draw_line:
-        #     return
-        # # --- --- --- --- --- ---
-
-        # player60: sprites.Player
-        # ball60: sprites.Ball
-        # ai60: sprites.CPUPlayer
-        # # Update the players
-        # for player60 in self.entities["players"]:
-        #     player60.task_wss(keys)
-        #     self.net_out.put()
         
-        # # Update the balls
-        # for ball60 in self.entities["balls"]:
-        #     ball60.task()
-
-        
-        # # Check collisions
-        # goal: sprites.Goal
-        # ball: sprites.ClientBall
-        # player: sprites.ClientPlayer
-
-        # for ball in self.entities["balls"]:
-        #     # -- Ball v. Player
-        #     for player in self.entities["players"]+self.entities["ai"]:
-        #         if self.check_collision(ball.sprite_rect, player.sprite_rect):
-
-        #             # Successful hit, but check owner to prevent multiple hit registrations
-        #             if not ball.owner or ball.owner != player:
-        #                 print(ball.owner, "hit by", player)
-        #                 ball.owner = player
-        #                 ball.set_velocity_basedOnPlayerMotion(player)
-            
-        #     # -- Ball v. Goals
-        #     for goal in self.entities["goals"]:
-        #         if ball.gotScored: continue
-        #         if self.check_collision(goal.sprite_rect, ball.sprite_rect):
-                    
-        #             # Set flag
-        #             ball.gotScored = True
-
-        #             # Halt game (starts next frame)
-        #             self.game_halt_for_x_ticks = 180
-        #             self.game_goal_scored = True
-
-        #             # Which post?
-        #             goal_name = goal.__class__.__name__
-        #             if "Left" in goal_name:
-        #                 self.game_scores[2] += 1
-        #                 ball.set_velocity(-1,0) # reset, set velocity toward Left player
-        #             elif "Right" in goal_name:
-        #                 self.game_scores[0] += 1
-        #                 ball.set_velocity(1,0) # reset, set velocity toward Right player
-
-        #             # Check which goal belongs
-        #             print(goal.__class__.__name__)
-        
-        # # Check screen edge for ball redirect
-        # for ball in self.entities["balls"]:
-        #     # if ball.sprite_rect.left <= 0 or ball.sprite_rect.right >= config.res_x:
-        #     #     ball.set_velocity(-ball.velocity_x, ball.velocity_y)
-        #     if ball.sprite_rect.top <= 0 or ball.sprite_rect.bottom >= config.res_y:
-        #         print("edging!")
-        #         ball.set_velocity(ball.velocity_x, -ball.velocity_y)
-
-        
-        # # -- debug, return ball back
-        # if keys[pygame.K_f]:
-        #     print("DEBUG: resetting ball position")
-        #     for ball in self.entities["balls"]:
-        #         ball.gotScored = False
-        #         ball.current_speed = ball.base_speed
-        #         ball.owner = None
-        #         ball.set_velocity(-1,0)
-        #         ball.move_position(dcol=config.MAX_COL // 3, drow=config.MAX_ROW // 2, set_position=True)
-        
-
-
         # # testing ui
-        # ui = render_text(f"¬¬¬   {self.game_scores[0]}   {self.game_scores[2]}`````````````````````(P1) {self.game_player_names[0]}¬¬¬   {self.game_player_names[2]} (P2)", justification=None)
-        # # ui = render_text("0   0`A`A`A`A`A`A`A`A`A`A`A`A`A`A")
+        ui = render_text(f"~(return) testing", justification=None)
+        # ui = render_text("0   0`A`A`A`A`A`A`A`A`A`A`A`A`A`A")
         
-        # self.entities["ui"] = ui
+        self.entities["ui"] = ui
         pass
 
     
@@ -1110,8 +970,10 @@ class ClientGame:
             self.clock.tick(config.frame_rate)
 
             for event in pygame.event.get():
+                inputManager.resolve_active_input_method(event=event)
                 if event.type == pygame.QUIT:
                     running = False
+                    
 
         pygame.quit()
 
@@ -1246,11 +1108,14 @@ class ClientGame:
 
         volume = f"@VOL& {volume:.1f}" if volume is not None and debug == True else "`"
         title = f"{volume}````````````&"
+        controller_guide = "~(return)"
         body = ""
 
+        
+
         for i, item in enumerate(self.menu_items):
-            prefix = "#> " if i == self.menu_index else "&  "
-            suffix = "#< " if i == self.menu_index else "&  "
+            prefix = f"#> " if i == self.menu_index else "&  "
+            suffix = f"#<{controller_guide}" if i == self.menu_index else "&  "
             body += f"{prefix}{item} {suffix}``"
 
         self.entities["ui"] = render_text(title + body)
@@ -1281,14 +1146,14 @@ class ClientGame:
         if self.lobby_id:
             text += (
                 "````"
-                "&@L& LEAVE LOBBY``"
+                "&@~(L)& LEAVE LOBBY``"
                 f"&({self.lobby_name})``"
             )
         else:
-            text += "````&@C& CREATE LOBBY``"
+            text += "````&@~(C)& CREATE LOBBY``"
 
 
-        text += "&@ESC& BACK``"
+        text += "&@~(ESCAPE)& BACK``"
 
         self.entities["ui"] = render_text(text)
 
