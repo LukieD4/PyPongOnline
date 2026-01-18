@@ -83,6 +83,7 @@ class ClientGame:
             "goals": [],
             "balls": [],
             "ui": [],
+            "demo": [],
             "decor": [],
         }
 
@@ -109,6 +110,7 @@ class ClientGame:
 
         # Main Menu
         self.main_menu_tick = 0
+        self.main_menu_invoke_resolution_changed = False
         self.main_menu_speaker = None
         self.menu_index = 0
         self.menu_items = ["SOLO", "ONLINE", "SCREEN", "QUIT"]
@@ -343,18 +345,24 @@ class ClientGame:
         now = time.time()
 
         # Volume sprites
-        if self.main_menu_tick == 1:
-            self.main_menu_speaker = py_sprites.Speaker()
-
-            # Volume sprite
-            self.entities["decor"].append(self.main_menu_speaker.summon(target_row=config.MAX_ROW-3,target_col=2, screen=self.screen))
+        if self.main_menu_tick == 1 or self.main_menu_invoke_resolution_changed == True:
+            self.main_menu_invoke_resolution_changed = False
+            
+            # Erase entities
+            self.entities["demo"].clear()
 
             # Generate demo sprites
-            self.entities["ai"].append(py_sprites.CPUPlayer().summon(target_row=5,target_col=config.MAX_COL-2,initial_sprite_index=2,screen=self.screen))
-            self.entities["ai"].append(py_sprites.CPUPlayer().summon(target_row=5,target_col=2,initial_sprite_index=0,screen=self.screen))
+            self.entities["demo"].append(py_sprites.CPUPlayer().summon(target_row=8, target_col=config.MAX_COL-2,initial_sprite_index=2,screen=self.screen))
+            self.entities["demo"].append(py_sprites.CPUPlayer().summon(target_row=8, target_col=2,initial_sprite_index=0,screen=self.screen))
 
-            self.entities["balls"].append(py_sprites.Ball().summon(target_col=config.MAX_COL//2, target_row=5, screen=self.screen))
-            # self.entities["balls"][0].set_velocity(1,0)
+            self.entities["demo"].append(py_sprites.Ball().summon(target_row=8, target_col=config.MAX_COL//2, screen=self.screen))
+            
+            # Volume icon
+            self.main_menu_speaker = py_sprites.Speaker()
+            self.entities["demo"].append(self.main_menu_speaker.summon(target_row=config.MAX_ROW-3, target_col=2, screen=self.screen))
+
+            # Logo icon
+            self.entities["demo"].append(py_sprites.Logo().summon(target_row=1, target_col=8, screen=self.screen))
         
         self.main_menu_speaker.sync_sprite_with_volume()
         
@@ -363,15 +371,15 @@ class ClientGame:
             entity.ticker()
             if hasattr(entity, "_do_task_demo"):
                 if "CPU" in entity.__class__.__name__:
-                    entity._do_task_demo(self.entities["balls"][0])
+                    entity._do_task_demo(self.entitiesFilterOutByTeam(self.entities["demo"],"balls")[0])
                 else:
                     entity._do_task_demo()
             
 
             # Collision check demo
-            for ball in self.entities["balls"]:
+            for ball in self.entitiesFilterOutByTeam(self.entities["demo"],"balls"):
                 # -- Ball v. Player
-                for player in self.entities["ai"]:
+                for player in self.entitiesFilterOutByTeam(self.entities["demo"],"ai"):
                     if self.check_collision(ball.sprite_rect, player.sprite_rect):
 
                         # Successful hit, but check owner to prevent multiple hit registrations
@@ -383,7 +391,7 @@ class ClientGame:
             
             # Check screen edge for ball redirect
             ball: py_sprites.Ball
-            for ball in self.entities["balls"]:
+            for ball in self.entitiesFilterOutByTeam(self.entities["demo"],"balls"):
                 ball.redirect_if_on_edge(soundMixer=soundMixer,soundVolumeOverride=0)
                 if ball.query_isOffscreen() and ball.edge_collision_buffer_ignore > 0:
                     ball.respawn()
@@ -936,6 +944,7 @@ class ClientGame:
             if self.current_scale != config.resolution_scale:
                 self.current_scale = config.resolution_scale
                 self.screen = pygame.display.set_mode((config.res_x, config.res_y))
+                self.main_menu_invoke_resolution_changed = True
                 set_always_on_top() #reapplies to the new game window
             
             # If 'mode' changed, update inputManager
@@ -1012,6 +1021,14 @@ class ClientGame:
     def entitiesAllDelete(self):
         self.entities = {k: [] for k in self.entities}
         return self.entities
+    
+    @staticmethod
+    def entitiesFilterOutByTeam(entity_list,team):
+        new_list = []
+        for entity in entity_list:
+            if entity.team == team.lower():
+                new_list.append(entity)
+        return new_list
     
     # -- Collision Detection
     def check_collision(self, rect_a, rect_b):
@@ -1124,7 +1141,7 @@ class ClientGame:
 
         # -- Punish rate limiter
         if self.net_is_rate_limited:
-            self.entities["ui"] = render_text("``:STOP SPAMMING&``Try again later``````@ESC &Back")
+            self.entities["ui"] = render_text("``:STOP SPAMMING&``Try again later``````@~(ESCAPE) &Back")
             return
 
 

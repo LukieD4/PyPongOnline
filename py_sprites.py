@@ -417,7 +417,7 @@ class MissingCell(Sprite):
 class Logo(Sprite):
     def __init__(self):
         super().__init__()
-        self.spritesheet = [[sprites_dir / "logo0.png"]]
+        self.spritesheet = [[sprites_dir / "logo150x44_1.png"]]
 
 
 
