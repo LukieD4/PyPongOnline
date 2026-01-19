@@ -216,3 +216,5 @@ dist_upx/
 build_linux/
 build_windows/
 py_client copy.py
+nuitka-crash-report.xml
+PyPongOnlineCfg.ini

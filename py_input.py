@@ -1,5 +1,6 @@
 import pygame, threading, asyncio
 from pygame import joystick
+from py_render import pixel_to_grid
 
 # Using Xbox's scheme!
 DEFAULT_CONTROLLER_BUTTON_MAP = {
@@ -49,9 +50,17 @@ CONTROLLER_AXIS_MAP = {
 }
 
 
+
+
+
 class InputManager:
     def __init__(self):
         self.mode = None  # updated externally in client.py main loop.
+
+        # Mouse tracking
+        self.mouse_object = None
+        self.mouse_pos_x, self.mouse_pos_y = 0, 0
+        self.mouse_pos_row, self.mouse_pos_col = 0, 0
 
         # Input method tracking
         self.last_input_method = "Default" # Default: Keyboard & Mouse, "Xbox Series X Controller": Controller
@@ -60,6 +69,28 @@ class InputManager:
         pygame.joystick.init()
         self.controller_thread = None
         self.controllers = []
+    
+    def initialise_cursor(self, cursor_object, screen):
+        self.mouse_object = cursor_object.summon(target_row=self.mouse_pos_row, target_col=self.mouse_pos_col,screen=screen)
+        return self.mouse_object
+    
+    def update_mouse_positioning_attributes(self, mouse_position) -> None:
+        self.mouse_pos_x, self.mouse_pos_y = mouse_position[0], mouse_position[1]
+        grid_space = pixel_to_grid(self.mouse_pos_x, self.mouse_pos_y)
+        self.mouse_pos_row, self.mouse_pos_col = grid_space["row"], grid_space["col"]
+
+    def update_mouse_input_state(self, event):
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            print(f"py_input : update_mouse_input_state (DOWN) : {event.pos}")
+            self.update_mouse_positioning_attributes(event.pos)
+            self.mouse_object.set_sprite(0,1)
+            return pygame.MOUSEBUTTONDOWN
+        elif event.type == pygame.MOUSEBUTTONUP:
+            print(f"py_input : update_mouse_input_state (UP) : {event.pos}")
+            self.update_mouse_positioning_attributes(event.pos)
+            self.mouse_object.set_sprite(0,0)
+            return pygame.MOUSEBUTTONUP
+            
     
     def resolve_active_input_method(self, event):
         if (event.type == pygame.KEYDOWN) or event.type in (pygame.MOUSEBUTTONDOWN, pygame.MOUSEMOTION):
@@ -72,6 +103,8 @@ class InputManager:
         elif event.type == pygame.JOYAXISMOTION:
             if abs(event.value) > 0.5 and self.controllers:
                 self.last_input_method = self.controllers[0].get_name()
+        
+        return self.last_input_method
 
 
     def get_controller_family(self):

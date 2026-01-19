@@ -22,6 +22,63 @@ for /f "tokens=1-4 delims=:.," %%a in ("%time%") do (
 )
 
 REM ==================================================
+REM LOCATE VSDEVCMD (can override by setting VSDEVCMD env var)
+REM ==================================================
+
+set "VSDEVCMD="
+
+if defined VSDEVCMD (
+    echo [INFO] Using VSDEVCMD from environment: %VSDEVCMD%
+) else (
+    REM --- Common Build Tools paths (short paths to avoid parentheses issues)
+    if exist "C:\PROGRA~2\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\vsdevcmd.bat" (
+        set "VSDEVCMD=C:\PROGRA~2\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\vsdevcmd.bat"
+    ) else if exist "C:\PROGRA~2\Microsoft Visual Studio\2019\BuildTools\Common7\Tools\vsdevcmd.bat" (
+        set "VSDEVCMD=C:\PROGRA~2\Microsoft Visual Studio\2019\BuildTools\Common7\Tools\vsdevcmd.bat"
+    ) else if exist "C:\PROGRA~2\Microsoft Visual Studio\18\BuildTools\Common7\Tools\vsdevcmd.bat" (
+        set "VSDEVCMD=C:\PROGRA~2\Microsoft Visual Studio\18\BuildTools\Common7\Tools\vsdevcmd.bat"
+    )
+
+    REM --- Try vswhere
+    if not defined VSDEVCMD (
+        if exist "C:\PROGRA~2\Microsoft Visual Studio\Installer\vswhere.exe" (
+            for /f "usebackq tokens=*" %%I in (`
+                "C:\PROGRA~2\Microsoft Visual Studio\Installer\vswhere.exe" ^
+                -latest -products * ^
+                -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 ^
+                -property installationPath
+            `) do (
+                if exist "%%I\Common7\Tools\vsdevcmd.bat" (
+                    set "VSDEVCMD=%%I\Common7\Tools\vsdevcmd.bat"
+                )
+            )
+        )
+    )
+)
+
+REM ==================================================
+REM INITIALISE VS ENVIRONMENT (MUST BE OUTSIDE PAREN BLOCKS)
+REM ==================================================
+
+if defined VSDEVCMD (
+    echo [INFO] Found vsdevcmd: %VSDEVCMD%
+    echo [INFO] Initializing Visual Studio build environment...
+
+    REM --- Use the architecture you actually have installed
+    call "%VSDEVCMD%" -arch=x86 -host_arch=x86
+
+    if errorlevel 1 (
+        echo [WARNING] vsdevcmd returned non-zero exit code; environment may not be loaded.
+    ) else (
+        echo [INFO] Visual Studio environment initialized.
+    )
+) else (
+    echo [WARNING] Could not locate vsdevcmd.bat automatically.
+    echo [WARNING] Build may fail without MSVC environment.
+)
+
+
+REM ==================================================
 REM PYTHON SELECTION
 REM ==================================================
 set VENV_PY=%SRCDIR%.venv\Scripts\python.exe
@@ -62,19 +119,35 @@ echo [INFO] Cleaning previous build...
 if exist "%TARGET_EXE%" del /q "%TARGET_EXE%" 2>nul
 
 REM ==================================================
-REM NUITKA ONEFILE BUILD
+REM PREPARE FILTERED SPRITES (exclude logo.png and logo.psd)
+REM ==================================================
+set "TMP_SPRITES=%TEMP%\pypong_sprites_%RANDOM%"
+
+REM remove any leftover temp folder
+if exist "%TMP_SPRITES%" rmdir /s /q "%TMP_SPRITES%"
+
+REM Use robocopy to copy sprites to temp, excluding the two files
+robocopy "%SRCDIR%sprites" "%TMP_SPRITES%" /E /XF "logo.png" "logo.psd" >nul
+
+REM Note: robocopy returns non-zero codes for some conditions; ignore them and continue
+
+REM ==================================================
+REM NUITKA ONEFILE BUILD (persistent tempdir)
 REM ==================================================
 echo [INFO] Building %PROJECT_NAME%...
 
 "%VENV_PY%" -m nuitka ^
  --onefile ^
+ --onefile-tempdir-spec="{TEMP}/PyPongOnline" ^
  --output-dir="%DISTDIR%" ^
  --output-filename="%PROJECT_NAME%.exe" ^
  --windows-icon-from-ico="%ICON_PATH%" ^
  --windows-file-version=1.0.0.%BUILDVER% ^
  --windows-product-version=1.0.0.%BUILDVER% ^
- --windows-console-mode=disable ^
- --include-data-dir=sprites=sprites ^
+ --windows-console-mode=attach ^
+ --include-data-dir="%TMP_SPRITES%=sprites" ^
+ --include-data-dir=audio=audio ^
+ --include-data-dir=stages=stages ^
  --include-module=asyncio ^
  --include-module=websockets ^
  --include-module=websockets.asyncio ^
@@ -110,6 +183,11 @@ echo [INFO] Building %PROJECT_NAME%...
  "%ENTRY_POINT%"
 
 REM ==================================================
+REM CLEANUP TEMP SPRITES
+REM ==================================================
+if exist "%TMP_SPRITES%" rmdir /s /q "%TMP_SPRITES%"
+
+REM ==================================================
 REM VERIFY BUILD
 REM ==================================================
 if not exist "%TARGET_EXE%" (
@@ -120,15 +198,9 @@ if not exist "%TARGET_EXE%" (
 )
 
 REM ==================================================
-REM COPY RESOURCE DIRECTORIES
+REM NOTE: No resource folders are copied into %DISTDIR% anymore
 REM ==================================================
-echo [INFO] Copying resource folders...
-
-robocopy "%SRCDIR%sprites" "%DISTDIR%\sprites" /E /XF *.py *.pyc *.pyo >nul
-robocopy "%SRCDIR%stages" "%DISTDIR%\stages" /E /XF *.py *.pyc *.pyo >nul
-
-echo [INFO] Resource folders copied.
-
+echo [INFO] Resources were packed into the onefile bundle; no folders copied to %DISTDIR%.
 
 REM ==================================================
 REM TIMER END

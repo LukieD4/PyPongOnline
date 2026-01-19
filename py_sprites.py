@@ -392,7 +392,12 @@ class Sprite:
 
 
 
-
+#region Cursor
+class Cursor(Sprite):
+    def __init__(self):
+        super().__init__()
+        self.spritesheet = [[sprites_dir / "cursor.png",
+                             sprites_dir / "cursor_click.png"]]
 
 #region Dashline
 class Dashline(Sprite):
@@ -440,6 +445,11 @@ class Speaker(Sprite):
                              sprites_dir / "volume" / "10.png"]]
         self.sprite_index = 2
         self.set_sprite(0,self.sprite_index)
+
+    def task_click(self):
+        # config.volume_multiplier = 0
+        # self.sync_sprite_with_volume()
+        pass
     
     def sync_sprite_with_volume(self):
         # volume_multiplier is between 0 and 1
@@ -651,6 +661,7 @@ class Ball(Sprite):
         # --- movement ---
         # print(self.velocity_x, self.velocity_y)
         self.move_position(dx=self.velocity_x, dy=self.velocity_y)
+        # print(self.pos_row, self.pos_col)
 
         # --- animation ---
         if self.tick % 5 == 0:

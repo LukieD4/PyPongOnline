@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import pygame, os, time, asyncio, websockets, queue, threading, json, sys
+import pygame, os, time, asyncio, websockets, queue, threading, json, sys, subprocess
 
 import py_sprites
 
@@ -13,14 +13,13 @@ from py_soundmixer import soundMixer
 
 from socket import gethostname
 from hashlib import sha256
-from random import randint
-
-
+from random import randint, choice
 
 
 debug = False
-gamesettings_filename = "game_settings.txt" # don't use resource_path for user settings
+gamesettings_filename = "PyPongOnlineCfg.ini" # don't use resource_path for user settings
 os.environ['SDL_VIDEO_CENTERED'] = '1'
+
 
 def running_as_exe():
     # Nuitka sets __compiled__ = True
@@ -85,6 +84,7 @@ class ClientGame:
             "ui": [],
             "demo": [],
             "decor": [],
+            "__internal_mouse__": [],
         }
 
         # initialise pygame
@@ -477,7 +477,7 @@ class ClientGame:
         if self.has_handshake_timeout():
             self.net_connected_epoch = time.time()
             self.net_last_epoch_attempt = 0
-            self.mode = "online-waiting" # -> self.updateOnlineWaiting
+            self.mode = "online-waiting-init" # -> self.initOnlineWaiting
             
             return
         
@@ -485,6 +485,41 @@ class ClientGame:
         if self.has_connection_refused():
             self.entities["ui"] = render_text(f"````(DEV)`Server settings failed```{self.net_last_error}`````@This screen is permanent``until restart.&")
             return
+        
+        # Spawn ball
+        # print(self.online_connect_tick)
+        if self.online_connect_tick % 60 == 0 and len(self.entities["balls"]) < 30:
+            self.entities["balls"].append(py_sprites.Ball().summon(target_row=randint(3,config.MAX_ROW), target_col=randint(3,config.MAX_COL), screen=self.screen))
+
+        ball: py_sprites.Ball
+        for ball in self.entities["balls"]:
+
+            def bounce(vx=None, vy=None):
+                ball.edge_collision_buffer_ignore = 5
+                ball.set_velocity(
+                    velocity_x=vx if vx is not None else ball.velocity_x,
+                    velocity_y=vy if vy is not None else ball.velocity_y
+                )
+                ball.surface_tint_colour = (
+                    randint(50, 200),
+                    randint(50, 200),
+                    randint(50, 200)
+                )
+
+            if ball.edge_collision_buffer_ignore <= 0:
+                # Horizontal bounce
+                if ball.pos_x <= 0 or ball.pos_x + ball.sprite_rect.width >= config.res_x:
+                    bounce(vx=-ball.velocity_x, vy=choice([-1, 1]))
+
+                # Vertical bounce
+                if ball.pos_y <= 0 or ball.pos_y + ball.sprite_rect.height >= config.res_y:
+                    bounce(vy=-ball.velocity_y, vx=choice([-1, 1]))
+
+            ball.ticker()
+            ball.task()
+
+
+
             
 
         # Defer to only every 30 frames, (2 times a second)
@@ -492,7 +527,7 @@ class ClientGame:
             self.ui_ellipse += 1
             self.dots = "." * ((self.ui_ellipse % 3) + 1)
 
-        # If the player is ALREADY CONNECTED online, redirect to lobby menu
+        # # If the player is ALREADY CONNECTED online, redirect to lobby menu
         if self.net_connected:
             soundMixer.play("connection_connected", "audio/connection_connected.ogg",vol_mult=self.game_volume)
             self.net_out.put(json.dumps({"type": "list_lobbies"}))
@@ -916,8 +951,8 @@ class ClientGame:
 
     # ========================================================
     # Main Loop
-    #region Main
-    def main(self):
+    #region Mainloop
+    def mainloop(self):
         running = True
 
         # NOW create the window
@@ -928,10 +963,13 @@ class ClientGame:
         )
         pygame.display.set_caption("PyPongOnline")
 
+        # Hide mouse cursor
+        pygame.mouse.set_visible(False)
+
         set_always_on_top()
 
         # load UI setting
-        saveGameSettings = os.path.exists("game_settings.txt")
+        saveGameSettings = os.path.exists(gamesettings_filename)
         if not saveGameSettings:
             config.redefine(scale=config.calculate_best_fit_scale(self.desktop_res_x, self.desktop_res_y))
             self.saveGameSettings()
@@ -967,10 +1005,10 @@ class ClientGame:
 
 
             # Mode dispatch
-            self.update_methods.get(self.mode, lambda: print(f"main : ⚠️  Warning: No update method implemented for self.mode: {self.mode}"))()
+            self.update_methods.get(self.mode, lambda: print(f"mainloop : ⚠️  Warning: No update method implemented for self.mode: {self.mode}"))()
 
             self.screen.fill((0, 0, 0))
-            for entity in self.entitiesAllReturn():
+            for entity in self.entitiesAllReturn() + self.entities["__internal_mouse__"]:
                 entity.draw(self.screen)
                 if entity.mark_for_deletion:
                     self.entities[entity.team].remove(entity)
@@ -979,9 +1017,39 @@ class ClientGame:
             self.clock.tick(config.frame_rate)
 
             for event in pygame.event.get():
-                inputManager.resolve_active_input_method(event=event)
+                # --- Track user's chosen input method ---
+                internal = self.entities["__internal_mouse__"]
+                current_method_of_input = inputManager.resolve_active_input_method(event=event)
+                if current_method_of_input == "Default":
+                    
+                    # Ensure exactly one Cursor instance exists
+                    if not internal:
+                        cursor: py_sprites.Cursor
+                        cursor = inputManager.initialise_cursor(py_sprites.Cursor(),screen=self.screen)
+                        internal.append(cursor)
+
+                    # Update cursor position
+                    mouse_x, mouse_y = pygame.mouse.get_pos()
+                    cursor.move_position(dx=mouse_x,dy=mouse_y,set_position=True)
+                else:
+                    self.entities["__internal_mouse__"].clear()
+
+
+                # --- Track mouse clicks ---
+                cursor = internal[0] if internal else None
+                cursor_state = inputManager.update_mouse_input_state(event=event)
+                if cursor and cursor_state == pygame.MOUSEBUTTONDOWN:
+                    entity: py_sprites.Sprite
+                    for entity in self.entitiesAllReturn():
+                        if (entity.pos_col,entity.pos_row) == (cursor.pos_col,cursor.pos_row):
+                            print("match!")
+                            if hasattr(entity,"task_click"):
+                                entity.task_click()
+
+                # --- Track game quit ---
                 if event.type == pygame.QUIT:
                     running = False
+
                     
 
         pygame.quit()
@@ -1008,19 +1076,34 @@ class ClientGame:
     
     def entitiesAppend(self, new_entities):
         for team, items in new_entities.items():
+            if team == "__internal_mouse__":
+                continue  # never touch internal
+
+            if team not in self.entities:
+                continue  # or raise, depending on your design
+
             for ent in items:
                 if ent not in self.entities[team]:
                     self.entities[team].append(ent)
+
         return self.entities
-
-
 
     def entitiesAllReturn(self):
-        return [e for lst in self.entities.values() for e in lst]
+        return [
+            e
+            for key, lst in self.entities.items()
+            if key != "__internal_mouse__"
+            for e in lst
+        ]
+
     
     def entitiesAllDelete(self):
-        self.entities = {k: [] for k in self.entities}
+        self.entities = {
+            k: (v if k == "__internal_mouse__" else [])
+            for k, v in self.entities.items()
+        }
         return self.entities
+
     
     @staticmethod
     def entitiesFilterOutByTeam(entity_list,team):
@@ -1188,4 +1271,4 @@ if __name__ == "__main__":
 
 
     # run the main game
-    ClientGame().main()
+    ClientGame().mainloop()
