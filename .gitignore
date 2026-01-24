@@ -218,3 +218,5 @@ build_windows/
 py_client copy.py
 nuitka-crash-report.xml
 PyPongOnlineCfg.ini
+sprites/logo.psd
+sprites/logo.png

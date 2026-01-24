@@ -52,10 +52,12 @@ CONTROLLER_AXIS_MAP = {
 
 
 
-
+#region InputManager
 class InputManager:
     def __init__(self):
         self.mode = None  # updated externally in client.py main loop.
+        self.mode_old = None
+        self.debug = False  # updated externally in client.py main loop.
 
         # Mouse tracking
         self.mouse_object = None
@@ -63,6 +65,7 @@ class InputManager:
         self.mouse_pos_row, self.mouse_pos_col = 0, 0
 
         # Input method tracking
+        self.current_input_method = ""
         self.last_input_method = "Default" # Default: Keyboard & Mouse, "Xbox Series X Controller": Controller
         
         # Detect controllers
@@ -70,6 +73,7 @@ class InputManager:
         self.controller_thread = None
         self.controllers = []
     
+    #region Mouse
     def initialise_cursor(self, cursor_object, screen):
         self.mouse_object = cursor_object.summon(target_row=self.mouse_pos_row, target_col=self.mouse_pos_col,screen=screen)
         return self.mouse_object
@@ -91,22 +95,27 @@ class InputManager:
             self.mouse_object.set_sprite(0,0)
             return pygame.MOUSEBUTTONUP
             
-    
+    #region Last Input
     def resolve_active_input_method(self, event):
+        current_input_method = self.current_input_method
+
         if (event.type == pygame.KEYDOWN) or event.type in (pygame.MOUSEBUTTONDOWN, pygame.MOUSEMOTION):
             self.last_input_method = "Default"
+            self.current_input_method = "Default"
 
         elif event.type in (pygame.JOYBUTTONDOWN, pygame.JOYHATMOTION):
             if self.controllers:
                 self.last_input_method = self.controllers[0].get_name()
+                self.current_input_method = self.controllers[0].get_name()
 
         elif event.type == pygame.JOYAXISMOTION:
             if abs(event.value) > 0.5 and self.controllers:
                 self.last_input_method = self.controllers[0].get_name()
+                self.current_input_method = self.controllers[0].get_name()
         
-        return self.last_input_method
+        return self.last_input_method, current_input_method
 
-
+    #region Controller
     def get_controller_family(self):
         if self.last_input_method == "Default":
             return None
@@ -125,8 +134,19 @@ class InputManager:
             return "DUALSHOCK"
 
         return "XBOX"  # fallback for generic controllers
+    
+    def get_latest_controllers(self):
+        while True:
+            self.controllers = [
+                pygame.joystick.Joystick(i)
+                for i in range(pygame.joystick.get_count())
+            ]
+            for c in self.controllers:
+                c.init()
 
+            pygame.time.wait(500)
 
+    #region Sprite resolver 
     def get_sprite_for_keyboard_key(self, keyboard_key):
         if self.last_input_method == "Default":
             return None
@@ -140,8 +160,6 @@ class InputManager:
             return None
 
         return CROSS_PLATFORM_SPRITE_MAP[family].get(button)
-
-
 
     def translate_keyboard_key_to_controller_key(self, keyboard_key:str):
         if self.mode not in INPUT_MODES:
@@ -172,19 +190,8 @@ class InputManager:
 
 
 
-    def get_latest_controllers(self):
-        while True:
-            self.controllers = [
-                pygame.joystick.Joystick(i)
-                for i in range(pygame.joystick.get_count())
-            ]
-            for c in self.controllers:
-                c.init()
-
-            pygame.time.wait(500)
-
-        
     
+    #region Actions    
     def get_action(self, action_name, keys):
         if self.mode not in INPUT_MODES:
             print(f"⚠️  InputManager: INPUT_MODES couldn't find a matching mode for '{self.mode}'")
@@ -203,7 +210,29 @@ class InputManager:
                     return True
 
         return False
+
+    def get_debug_action(self, debug_action_name, keys):
+        if self.mode not in INPUT_MODES:
+            if self.mode_old == self.mode:
+                self.mode_old = self.mode
+                print(f"[🧿]  InputManager: DEBUG_INPUT_MODES couldn't find a matching mode for '{self.mode}'")
+            return False
+
+        key_list = DEBUG_INPUT_MODES[self.mode].get(debug_action_name, [])
+
+        for key in key_list:
+            if isinstance(key, str):
+                key_const = getattr(pygame, key, None)
+                if key_const is not None and keys[key_const]:
+                    return True
+
+            elif callable(key):
+                if key():
+                    return True
+
+        return False
     
+    #region Static methods
     @staticmethod
     def universal_back():
         return ["K_ESCAPE", "K_BACKSPACE", InputManager.controller_button("b"), InputManager.controller_button("back")]
@@ -273,6 +302,7 @@ inputManager.controller_thread.start()
 
 
 
+#region INPUT_MODES
 # Define input modes and their associated key actions
 INPUT_MODES = {
     "menu": {
@@ -372,6 +402,48 @@ INPUT_MODES = {
         ],
         "back": [
             *InputManager.universal_back()
+        ],
+    },
+}
+
+#region DEBUG_MODES
+DEBUG_INPUT_MODES = {
+    "menu": {
+        "toggle_fps": [
+            "K_F1"
+        ],
+        "unlock_fps": [
+            "K_F2"
+        ],
+        "custom_fps": [
+            "K_F3"
+        ],
+        "custom_fps_impact": [
+            "K_F4"
+        ],
+    },
+
+    "lobby-browser": {
+        "tbd": [
+
+        ],
+    },
+
+    "lost": {
+        "tbd": [
+
+        ],
+    },
+
+    "online-offline": {
+        "tbd": [
+
+        ],
+    },
+
+    "offline-game": {
+        "tbd": [
+
         ],
     },
 }

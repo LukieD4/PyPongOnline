@@ -15,10 +15,24 @@ from socket import gethostname
 from hashlib import sha256
 from random import randint, choice
 
+# :: FPS SPEEDS BEFORE, basis 60fps unlocked ::
+# 120% Jona's gaming laptop
+# 165% My results
+# 15% on Uni computer (to emulate use self.__fps_impact = 0.11f)
 
-debug = False
+
+# :: FPS SPEEDS AFTER, Fixing unneccessary UI rendering
+# 560% Jona's gaming laptop
+# 1295% My Results
+# ~118% on Uni computer (estimated)
+
+
+gamebuildversion_filename = "buildver.txt"
 gamesettings_filename = "PyPongOnlineCfg.ini" # don't use resource_path for user settings
 os.environ['SDL_VIDEO_CENTERED'] = '1'
+
+# BLACKLIST = {"__internal_mouse__", "__debug__"}
+BLACKLIST = {"__internal_mouse__"}
 
 
 def running_as_exe():
@@ -74,6 +88,7 @@ class ClientGame:
         self.uri = "wss://pypongonline.onrender.com/ws"
         # self.uri = "ws://localhost:8000/ws" # local testing, comment out for production
     
+        self.__BUILD_VER = f"{self.generateBuildVerIfNotExe()}"
 
         # --- entities ---
         self.entities = {
@@ -85,6 +100,7 @@ class ClientGame:
             "demo": [],
             "decor": [],
             "__internal_mouse__": [],
+            "__debug__": [],
         }
 
         # initialise pygame
@@ -96,7 +112,7 @@ class ClientGame:
         self.screen = pygame.display.set_mode((config.res_x, config.res_y))
         self.clock = pygame.time.Clock()
         self.current_scale = config.resolution_scale
-        self.frame_count = 0
+
 
         # Set stage
         self.stager = Stager(self.screen,self.entities)
@@ -107,6 +123,26 @@ class ClientGame:
         # --- mode ---
         self.mode = "menu-init"
         self.mode_old = None
+
+        # Main loop (while running:)
+        self.debug = True
+        self.debug_input_epoch = 0
+        self.debug_overlay = False
+        self.main_loop_frame_count = 0
+        self.main_loop_fps_last_epoch = time.time()
+        self.main_loop_fps_tracking = 0
+        self.main_loop_fps = 0
+        self.__fps_impact = 0
+
+        # Caching
+        self.__cache_frame__ = -1
+        self.__entitiesAllReturn_cache = []
+        self.__entitiesFilterOutByTeam_cache__ = {}
+        self.__entitiesBlacklist_cache__ = {}
+        self._entity_membership_sets = {k: set() for k in self.entities.keys()}
+        self.__client_ui_cached_text = ""
+        self.__debug_ui_cached_text = ""
+
 
         # Main Menu
         self.main_menu_tick = 0
@@ -336,13 +372,16 @@ class ClientGame:
 
     def initMainMenu(self):
         self.main_menu_tick = 0
-        self.entitiesAllDelete()
         self.mode = "menu"
+        self.entitiesAllDelete()
+        self._invalidate_ui_caches()
 
     def updateMainMenu(self):
         self.main_menu_tick += 1
         keys = pygame.key.get_pressed()
         now = time.time()
+
+        entities_demo = self.entities["demo"]
 
         # Volume sprites
         if self.main_menu_tick == 1 or self.main_menu_invoke_resolution_changed == True:
@@ -352,17 +391,17 @@ class ClientGame:
             self.entities["demo"].clear()
 
             # Generate demo sprites
-            self.entities["demo"].append(py_sprites.CPUPlayer().summon(target_row=8, target_col=config.MAX_COL-2,initial_sprite_index=2,screen=self.screen))
-            self.entities["demo"].append(py_sprites.CPUPlayer().summon(target_row=8, target_col=2,initial_sprite_index=0,screen=self.screen))
+            entities_demo.append(py_sprites.CPUPlayer().summon(target_row=8, target_col=config.MAX_COL-2,initial_sprite_index=2,screen=self.screen))
+            entities_demo.append(py_sprites.CPUPlayer().summon(target_row=8, target_col=2,initial_sprite_index=0,screen=self.screen))
 
-            self.entities["demo"].append(py_sprites.Ball().summon(target_row=8, target_col=config.MAX_COL//2, screen=self.screen))
+            entities_demo.append(py_sprites.Ball().summon(target_row=8, target_col=config.MAX_COL//2, screen=self.screen))
             
             # Volume icon
             self.main_menu_speaker = py_sprites.Speaker()
-            self.entities["demo"].append(self.main_menu_speaker.summon(target_row=config.MAX_ROW-3, target_col=2, screen=self.screen))
+            entities_demo.append(self.main_menu_speaker.summon(target_row=config.MAX_ROW-3, target_col=2, screen=self.screen))
 
             # Logo icon
-            self.entities["demo"].append(py_sprites.Logo().summon(target_row=1, target_col=8, screen=self.screen))
+            entities_demo.append(py_sprites.Logo().summon(target_row=1, target_col=8, screen=self.screen))
         
         self.main_menu_speaker.sync_sprite_with_volume()
         
@@ -371,15 +410,15 @@ class ClientGame:
             entity.ticker()
             if hasattr(entity, "_do_task_demo"):
                 if "CPU" in entity.__class__.__name__:
-                    entity._do_task_demo(self.entitiesFilterOutByTeam(self.entities["demo"],"balls")[0])
+                    entity._do_task_demo(self.entitiesFilterOutByTeam(entities_demo,"balls")[0])
                 else:
                     entity._do_task_demo()
             
 
             # Collision check demo
-            for ball in self.entitiesFilterOutByTeam(self.entities["demo"],"balls"):
+            for ball in self.entitiesFilterOutByTeam(entities_demo,"balls"):
                 # -- Ball v. Player
-                for player in self.entitiesFilterOutByTeam(self.entities["demo"],"ai"):
+                for player in self.entitiesFilterOutByTeam(entities_demo,"ai"):
                     if self.check_collision(ball.sprite_rect, player.sprite_rect):
 
                         # Successful hit, but check owner to prevent multiple hit registrations
@@ -391,7 +430,7 @@ class ClientGame:
             
             # Check screen edge for ball redirect
             ball: py_sprites.Ball
-            for ball in self.entitiesFilterOutByTeam(self.entities["demo"],"balls"):
+            for ball in self.entitiesFilterOutByTeam(entities_demo,"balls"):
                 ball.redirect_if_on_edge(soundMixer=soundMixer,soundVolumeOverride=0)
                 if ball.query_isOffscreen() and ball.edge_collision_buffer_ignore > 0:
                     ball.respawn()
@@ -459,16 +498,19 @@ class ClientGame:
                 # save settings
                 self.saveGameSettings()
 
+        # -- Apply data
+        self.entities["demo"] = entities_demo
 
-        self.renderMenuText(volume=self.game_volume)
+        # -- Render UI
+        self.renderMenuText(volume=self.game_volume, justification="centre")
 
     # ========================================================
     # Online Connect / Waiting
     #region OnlineConnect
     def initOnlineConnect(self):
         self.online_connect_tick = 0
-        self.entitiesAllDelete()
         self.mode = "online-connect"
+        self.entitiesAllDelete()
 
     def updateOnlineConnect(self):
         self.online_connect_tick += 1
@@ -483,7 +525,7 @@ class ClientGame:
         
         # Dev: the user forgot to launch their server
         if self.has_connection_refused():
-            self.entities["ui"] = render_text(f"````(DEV)`Server settings failed```{self.net_last_error}`````@This screen is permanent``until restart.&")
+            self.__client_ui_cached_text = self._render_ui_gateway_solver(f"````(DEV)`Server settings failed```{self.net_last_error}`````@This screen is permanent``until restart.&",self.__client_ui_cached_text)
             return
         
         # Spawn ball
@@ -539,15 +581,13 @@ class ClientGame:
             self.mode = "lost-init" # -> self.updateLost
             return
 
-        self.entities["ui"] = render_text(
-            f"``CONNECTING TO`¬@ONRENDER.COM{self.dots}``"
-        )
+        self.__client_ui_cached_text = self._render_ui_gateway_solver(f"``CONNECTING TO`¬@ONRENDER.COM{self.dots}``",self.__client_ui_cached_text)
 
     #region OnlineWaiting
     def initOnlineWaiting(self):
         self.online_waiting_tick = 0
-        self.entitiesAllDelete()
         self.mode = "online-waiting"
+        self.entitiesAllDelete()
 
 
     def updateOnlineWaiting(self):
@@ -575,11 +615,14 @@ class ClientGame:
             # change the colour of the elapsed time to indicate sent attempt
             elapsed_net_out_colour = "@" if elapsed % self.net_rendercom_retry_s == 0 else ""
 
-            self.entities["ui"] = render_text(
+            final_text = [
                  "``SERVER IS COLD BOOTING``"
                 f"``THIS MAY TAKE UP TO {self.net_rendercom_timeout} SECONDS.`BUT USUALLY TAKES 60`"
                 f"{elapsed_net_out_colour}({self.net_rendercom_timeout-elapsed})&`{self.dots}```#You're the only player online.`thanks for playing my game!"
-            )
+            ]
+            final_text = final_text[0]
+
+            self.__client_ui_cached_text = self._render_ui_gateway_solver(final_text,self.__client_ui_cached_text)
 
             # Retry every ~15 seconds (throttled)
             if elapsed - self.net_last_epoch_attempt >= self.net_rendercom_retry_s:
@@ -593,19 +636,15 @@ class ClientGame:
     #region OnlineOffline
     def initOnlineOffline(self):
         self.online_offline_tick = 0
-        self.entitiesAllDelete()
         self.mode = "online-offline"
+        self.entitiesAllDelete()
 
     def updateOnlineOffline(self):
         self.online_offline_tick += 1
 
         keys = pygame.key.get_pressed()
 
-        self.entities["ui"] = render_text(
-            "```@(SERVER)```"
-            "``PLEASE TRY AGAIN LATER``"
-            "``ESC BACK TO MENU``"
-        )
+        self.__client_ui_cached_text = self._render_ui_gateway_solver("```@(SERVER)`````PLEASE TRY AGAIN LATER````ESC BACK TO MENU``",self.__client_ui_cached_text)
 
         if inputManager.get_action("back", keys):
             self.mode = "menu-init"
@@ -615,8 +654,8 @@ class ClientGame:
     #region Lobby Browse
     def initLobbyBrowser(self):
         self.lobby_browser_tick = 0
-        self.entitiesAllDelete()
         self.mode = "lobby-browser"
+        self.entitiesAllDelete()
 
     def updateLobbyBrowser(self):
         self.lobby_browser_tick += 1
@@ -624,7 +663,7 @@ class ClientGame:
         keys = pygame.key.get_pressed()
         now = time.time()
 
-
+        # --- FETCH WEBSERVER DATA ---
         while not self.net_in.empty():
             raw = self.net_in.get()
 
@@ -645,77 +684,87 @@ class ClientGame:
             # --- Check for lobby assoicated things ---
             if not self.net_is_rate_limited:
 
-                if msg_type == "lobby_list":
-                    self.lobbies = msg.get("lobbies", [])
+                match msg_type:
+                
+                    case "lobby_list":
+                        self.lobbies = msg.get("lobbies", [])
 
-                elif msg_type == "lobby_status":
-                    # set lobby info if joined
-                    
-                    self.lobby_id = msg.get("id")
-                    self.lobby_name = msg.get("name")
+                    case "lobby_status":
+                        # set lobby info if joined
+                        
+                        self.lobby_id = msg.get("id")
+                        self.lobby_name = msg.get("name")
 
-                    if self.lobby_id and self.lobby_name:
-                        soundMixer.play("lobby_create", "audio/lobby_create.ogg",vol_mult=self.game_volume)
-                    else:
-                        soundMixer.play("lobby_leave", "audio/lobby_leave.ogg",vol_mult=self.game_volume)
+                        if self.lobby_id and self.lobby_name:
+                            soundMixer.play("lobby_create", "audio/lobby_create.ogg",vol_mult=self.game_volume)
+                        else:
+                            soundMixer.play("lobby_leave", "audio/lobby_leave.ogg",vol_mult=self.game_volume)
 
-                elif msg_type == "start_game":
-                    self.mode = "transON-init"
+                    case "start_game":
+                        self.mode = "transON-init"
         
 
-        # User inputs
-        if now - self.lobby_input_epoch > 0.2 and not self.mode in ["transON-init", "transOFF-init"]:
-            
-            # Run these always
-            # print(f"updateLobbyBrowser: .get_action('create' : {inputManager.get_action("create", keys)} : .get_action('leave', keys) : {inputManager.get_action("leave", keys)}")
-            if inputManager.get_action("create", keys) and (not self.lobby_id) and (not self.net_is_rate_limited):
-                print(f"updateLobbyBrowser : creating lobby")
+        # --- USER INTERACTIONS --
+        is_cooling_down = now - self.lobby_input_epoch < 0.2
+        if is_cooling_down: return self.renderLobbyUI()
+
+        is_in_a_lobby = self.lobby_id != None
+        wants_to_create_lobby = inputManager.get_action("create", keys)
+        wants_to_leave_lobby = inputManager.get_action("leave", keys)
+        wants_to_go_back = inputManager.get_action("back", keys)
+
+        if wants_to_create_lobby and (not is_in_a_lobby):
+            print(f"updateLobbyBrowser : creating lobby")
+            self.net_out.put(json.dumps({
+                "type": "create_lobby",
+                "owner": self.client_id_hash
+            }))
+            self.lobby_input_epoch = now
+        
+        if wants_to_leave_lobby and (is_in_a_lobby):
+            print(f"updateLobbyBrowser : leave lobby")
+            self.net_out.put(json.dumps({"type": "leave_lobby"}))
+            self.lobby_input_epoch = now
+
+        if inputManager.get_action("back", keys):
+            self.mode = "menu-init"
+
+
+        # !! Gatekeep any further actions if CLIENT IS IN A LOBBY !!
+        # elif self.lobby_id is not None:
+        #     return # <-- exit early
+        # commented out: it gets in the way of controller mapping
+
+        if is_in_a_lobby: return
+
+        
+        wants_to_scrollUp = inputManager.get_action("up", keys)
+        wants_to_scrollDown = inputManager.get_action("down", keys)
+        wants_to_select = inputManager.get_action("select", keys)
+
+        if wants_to_scrollUp:
+            soundMixer.play("scroll", "audio/scroll.ogg",vol_mult=self.game_volume)
+            self.lobby_index = max(0, self.lobby_index - 1)
+            self.lobby_input_epoch = now
+
+        if wants_to_scrollDown:
+            soundMixer.play("scroll", "audio/scroll.ogg",vol_mult=self.game_volume)
+            self.lobby_index = min(len(self.lobbies) - 1, self.lobby_index + 1)
+            self.lobby_input_epoch = now
+
+        if wants_to_select:
+            soundMixer.play("scroll", "audio/scroll.ogg",vol_mult=self.game_volume)
+            if not self.lobby_id:
+                # Prevent an index in empty 'self.lobbies[]' crash
+                if len(self.lobbies) == 0:
+                    return
+                # Join a lobby
+                lobby_id = self.lobbies[self.lobby_index]["id"]
                 self.net_out.put(json.dumps({
-                    "type": "create_lobby",
-                    "owner": self.client_id_hash
+                    "type": "join_lobby",
+                    "id": lobby_id
                 }))
-                self.lobby_input_epoch = now
-            
-            elif inputManager.get_action("leave", keys) and (self.lobby_id) and (not self.net_is_rate_limited):
-                print(f"updateLobbyBrowser : checking input keys")
-                if self.lobby_id and inputManager.get_action("leave", keys):
-                    print(f"updateLobbyBrowser : leave lobby")
-                    self.net_out.put(json.dumps({"type": "leave_lobby"}))
-                    self.lobby_input_epoch = now
-
-            elif inputManager.get_action("back", keys):
-                self.mode = "menu-init"
-
-
-            # !! Gatekeep any further actions if CLIENT IS IN A LOBBY !!
-            # elif self.lobby_id is not None:
-            #     return # <-- exit early
-            # commented out: it gets in the way of controller mapping
-            
-
-            if inputManager.get_action("up", keys):
-                soundMixer.play("scroll", "audio/scroll.ogg",vol_mult=self.game_volume)
-                self.lobby_index = max(0, self.lobby_index - 1)
-                self.lobby_input_epoch = now
-
-            elif inputManager.get_action("down", keys):
-                soundMixer.play("scroll", "audio/scroll.ogg",vol_mult=self.game_volume)
-                self.lobby_index = min(len(self.lobbies) - 1, self.lobby_index + 1)
-                self.lobby_input_epoch = now
-
-            elif inputManager.get_action("select", keys):
-                soundMixer.play("scroll", "audio/scroll.ogg",vol_mult=self.game_volume)
-                if not self.lobby_id:
-                    # Prevent an index in empty 'self.lobbies[]' crash
-                    if len(self.lobbies) == 0:
-                        return
-                    # Join a lobby
-                    lobby_id = self.lobbies[self.lobby_index]["id"]
-                    self.net_out.put(json.dumps({
-                        "type": "join_lobby",
-                        "id": lobby_id
-                    }))
-                self.lobby_input_epoch = now
+            self.lobby_input_epoch = now
 
         self.renderLobbyUI()
 
@@ -741,10 +790,7 @@ class ClientGame:
     def updateOnlineGame(self):
         
         # # testing ui
-        ui = render_text(f"~(return) testing", justification=None)
-        # ui = render_text("0   0`A`A`A`A`A`A`A`A`A`A`A`A`A`A")
-        
-        self.entities["ui"] = ui
+        self.__client_ui_cached_text = self._render_ui_gateway_solver(f"~(return) testing",self.__client_ui_cached_text)
         pass
 
     
@@ -753,6 +799,11 @@ class ClientGame:
     # region OfflineGame
     def initOfflineGame(self):
         self.transition_tick = 0
+
+        # Clears
+        # self._invalidate_ui_caches()
+        # self._invalidate_entity_caches()
+        # self.entitiesAllDelete()
 
         # Playing offline
         self.playOFF_tick = 0
@@ -921,10 +972,7 @@ class ClientGame:
 
 
         # testing ui
-        ui = render_text(f"¬¬¬   {self.game_scores[0]}   {self.game_scores[2]}`````````````````````(P1) {self.game_player_names[0]}¬¬¬   {self.game_player_names[2]} (P2)", justification=None)
-        # ui = render_text("0   0`A`A`A`A`A`A`A`A`A`A`A`A`A`A")
-        
-        self.entities["ui"] = ui
+        self.__client_ui_cached_text = self._render_ui_gateway_solver(f"¬¬¬   {self.game_scores[0]}   {self.game_scores[2]}`````````````````````(P1) {self.game_player_names[0]}¬¬¬   {self.game_player_names[2]} (P2)",self.__client_ui_cached_text, justification=None)
 
      
 
@@ -935,13 +983,13 @@ class ClientGame:
     def initLostConnectionMenu(self):
         self.net_lost_tick = 0
         soundMixer.play("connection_lost", "audio/connection_lost.ogg",vol_mult=self.game_volume)
-        self.entitiesAllDelete()
         self.mode = "lost"
+        self.entitiesAllDelete()
         
 
     def updateLostConnectionMenu(self):
         self.net_lost_tick += 1
-        self.entities["ui"] = render_text("```Connection lost. Sorry!```")
+        self.__client_ui_cached_text = self._render_ui_gateway_solver("```Connection lost. Sorry!```",self.__client_ui_cached_text)
 
         if self.net_lost_tick >= 240:
             self.net_connected = False
@@ -976,18 +1024,65 @@ class ClientGame:
 
         # Main loop
         while running:
-            self.frame_count += 1
+
+            time.sleep(self.__fps_impact)
+
+            # DEBUG USE ONLY
+            if self.debug:
+                # --- Calculate fps --- #
+                self.main_loop_fps_tracking += 1
+                now = time.time()
+
+                if now - self.main_loop_fps_last_epoch >= 1.0:
+                    self.main_loop_fps = self.main_loop_fps_tracking
+                    self.main_loop_fps_tracking = 0
+                    self.main_loop_fps_last_epoch = now
+
+                keys = pygame.key.get_pressed()
+
+                if now >= self.debug_input_epoch:
+
+                    if inputManager.get_debug_action("toggle_overlay", keys):
+                        self.debug_overlay = not self.debug_overlay
+                    if inputManager.get_debug_action("unlock_fps", keys):
+                        redefine_task = config.redefine(framerate=999) if config.frame_rate != 999 else config.redefine(framerate=60)
+                    if inputManager.get_debug_action("custom_fps", keys):
+                        config.redefine(framerate=float(input("Enter custom fps (this field is not sanitised):")))
+                    if inputManager.get_debug_action("custom_fps_impact", keys):
+                        self.__fps_impact = float(input("Enter custom fps impact float (delay) (this field is not sanitised):"))
+                if any(keys) > 0:
+                    self.debug_input_epoch = now+.3
+                
+                fps_percent = (self.main_loop_fps / 60) * 100
+                fps_final_text = [
+                    f"@FPS _ {self.main_loop_fps} ({fps_percent:.0f}P)`"
+                    f"FPS UNLOCKED _ {config.frame_rate != 60}`"
+                    f"VOL _ {config.volume_multiplier}`"
+                    f"CONN _ {self.net_connected}`"
+
+                    f"BUILDVER _ {self.__BUILD_VER}`"
+                ]
+                fps_final_text = fps_final_text[0]
+
+                if fps_final_text != self.__debug_ui_cached_text:
+                    self.__debug_ui_cached_text = fps_final_text
+                    self.entities["__debug__"] = render_text(fps_final_text,justification="left")
+
+            # Increment frame counter
+            self.main_loop_frame_count += 1
 
             # If rescale is detected, update the window
             if self.current_scale != config.resolution_scale:
                 self.current_scale = config.resolution_scale
                 self.screen = pygame.display.set_mode((config.res_x, config.res_y))
                 self.main_menu_invoke_resolution_changed = True
+                self.entities["__internal_mouse__"].clear()
                 set_always_on_top() #reapplies to the new game window
             
             # If 'mode' changed, update inputManager
             if self.mode_old != self.mode:
                 inputManager.mode = self.mode
+                inputManager.debug = self.debug
                 self.mode_old = self.mode
 
             # Dev: halt the main loop
@@ -1019,7 +1114,7 @@ class ClientGame:
             for event in pygame.event.get():
                 # --- Track user's chosen input method ---
                 internal = self.entities["__internal_mouse__"]
-                current_method_of_input = inputManager.resolve_active_input_method(event=event)
+                current_method_of_input, previous_method_of_input = inputManager.resolve_active_input_method(event=event)
                 if current_method_of_input == "Default":
                     
                     # Ensure exactly one Cursor instance exists
@@ -1033,6 +1128,10 @@ class ClientGame:
                     cursor.move_position(dx=mouse_x,dy=mouse_y,set_position=True)
                 else:
                     self.entities["__internal_mouse__"].clear()
+
+                # -- Should clear cache to update ui?
+                if current_method_of_input != previous_method_of_input:
+                    self._invalidate_ui_caches()
 
 
                 # --- Track mouse clicks ---
@@ -1067,6 +1166,10 @@ class ClientGame:
         # edit the scale change
         config.redefine(scale=new_scale)
 
+        # clear caches
+        self._invalidate_ui_caches()
+        self._invalidate_entity_caches()
+
         # apply the scalings to all entities
         for entity in self.entitiesAllReturn():
             entity.rescale()
@@ -1074,44 +1177,121 @@ class ClientGame:
         # save setting
         self.saveGameSettings()
     
+    
+
     def entitiesAppend(self, new_entities):
+        """
+        Append new_entities: dict[team] -> list[entity].
+        Invalidate caches only if something actually changed.
+        """
+        changed = False
+
         for team, items in new_entities.items():
-            if team == "__internal_mouse__":
-                continue  # never touch internal
+            if team in BLACKLIST:
+                continue
 
             if team not in self.entities:
-                continue  # or raise, depending on your design
+                # keep current behavior: ignore unknown teams
+                continue
 
+            target_list = self.entities[team]
+            # Fast path: if many items, avoid O(n^2) by using a set
+            membership = set(target_list)
             for ent in items:
-                if ent not in self.entities[team]:
-                    self.entities[team].append(ent)
+                if ent not in membership:
+                    target_list.append(ent)
+                    membership.add(ent)
+                    changed = True
+
+            # optional: keep membership sets in sync
+            if hasattr(self, "_entity_membership_sets"):
+                self._entity_membership_sets[team] = membership
+
+        if changed:
+            self._invalidate_entity_caches()
 
         return self.entities
+
+
 
     def entitiesAllReturn(self):
-        return [
-            e
-            for key, lst in self.entities.items()
-            if key != "__internal_mouse__"
-            for e in lst
-        ]
+        """Flattened list of all entities excluding BLACKLIST teams, cached per frame."""
+        if self.__cache_frame__ != self.main_loop_frame_count:
+            self.__cache_frame__ = self.main_loop_frame_count
+            self.__entitiesAllReturn_cache = [
+                e
+                for key, lst in self.entities.items()
+                if key not in BLACKLIST
+                for e in lst
+            ]
+            # reset per-frame filter caches
+            self.__entitiesFilterOutByTeam_cache__ = {}
+            self.__entitiesBlacklist_cache__ = {}
 
-    
+        return self.__entitiesAllReturn_cache
+
+
+
     def entitiesAllDelete(self):
-        self.entities = {
-            k: (v if k == "__internal_mouse__" else [])
-            for k, v in self.entities.items()
-        }
+        """Clear all non-blacklisted teams while preserving blacklisted lists."""
+        for k in list(self.entities.keys()):
+            if k not in BLACKLIST:
+                self.entities[k].clear()
+
+        self._invalidate_entity_caches()
         return self.entities
 
+
+
+    def entitiesFilterOutByTeam(self, entity_list, team):
+        key = (id(entity_list), team.lower())
+
+        if key in self.__entitiesFilterOutByTeam_cache__:
+            return self.__entitiesFilterOutByTeam_cache__[key]
+
+        result = [e for e in entity_list if e.team == team.lower()]
+        self.__entitiesFilterOutByTeam_cache__[key] = result
+        return result
+
+
+    def entitiesBlacklist(self, entity_list):
+        """Return entities not in BLACKLIST teams, cached per-frame by list identity."""
+        key = id(entity_list)
+        if key in self.__entitiesBlacklist_cache__:
+            return self.__entitiesBlacklist_cache__[key]
+
+        result = [e for e in entity_list if getattr(e, "team", "") not in BLACKLIST]
+        self.__entitiesBlacklist_cache__[key] = result
+        return result
+
     
-    @staticmethod
-    def entitiesFilterOutByTeam(entity_list,team):
-        new_list = []
-        for entity in entity_list:
-            if entity.team == team.lower():
-                new_list.append(entity)
-        return new_list
+
+
+    def _render_ui_gateway_solver(self, set_self_entities_ui_text, self_variable, justification: str | None = "centre"):
+        if set_self_entities_ui_text != self_variable:
+            self.entities["ui"] = render_text(set_self_entities_ui_text,justification=justification)
+        return set_self_entities_ui_text
+
+    def _invalidate_entity_caches(self):
+        self.__cache_frame__ = -1
+        self.__entitiesFilterOutByTeam_cache__.clear()
+        self.__entitiesBlacklist_cache__.clear()
+        # keep entitiesAllReturn_cache cleared too
+        self.__entitiesAllReturn_cache = []
+    
+    def _invalidate_ui_caches(self):
+        self.__debug_ui_cached_text = None
+        self.__client_ui_cached_text = None
+        print("CLEARED UI CACHE! (Things should appear back on the screen now!)")
+    
+
+
+
+    def check_collision(self, rect_a, rect_b):
+        if not rect_a or not rect_b:
+            return False
+        return rect_a.colliderect(rect_b)
+
     
     # -- Collision Detection
     def check_collision(self, rect_a, rect_b):
@@ -1149,6 +1329,26 @@ class ClientGame:
             print(f"loadGameSettings : settings failed to load (outdated or corrupted? we make a new file instead) : {e}")
             self.saveGameSettings()
             self.loadGameSettings()
+
+
+    def generateBuildVerIfNotExe(self):
+        if not running_as_exe():
+            try:
+                with open(gamebuildversion_filename, "r+") as f:
+                    old = f.read().strip()
+                    old_num = int(old) if old else 0
+                    new_num = old_num + 1
+
+                    f.seek(0)
+                    f.write(str(new_num))
+                    f.truncate()
+
+                    return new_num
+
+            except FileNotFoundError:
+                with open(gamebuildversion_filename, "w") as f:
+                    f.write("1")
+                    return 1
 
 
     # ========================================================
@@ -1204,27 +1404,26 @@ class ClientGame:
 
             ui_entities.pop(0)
 
-    def renderMenuText(self, volume=None):
+    def renderMenuText(self, volume=None, justification=None):
 
-        volume = f"@VOL& {volume:.1f}" if volume is not None and debug == True else "`"
-        title = f"{volume}````````````&"
+        title = f"`````````````&"
         controller_guide = "~(return)"
         body = ""
-
-        
 
         for i, item in enumerate(self.menu_items):
             prefix = f"#> " if i == self.menu_index else "&  "
             suffix = f"#<{controller_guide}" if i == self.menu_index else "&  "
             body += f"{prefix}{item} {suffix}``"
 
-        self.entities["ui"] = render_text(title + body)
+        # -- Render UI once, update upon change ---
+        final_text = title + body
+        self.__client_ui_cached_text = self._render_ui_gateway_solver(final_text,self.__client_ui_cached_text, justification=justification)
 
     def renderLobbyUI(self):
 
         # -- Punish rate limiter
         if self.net_is_rate_limited:
-            self.entities["ui"] = render_text("``:STOP SPAMMING&``Try again later``````@~(ESCAPE) &Back")
+            self.__client_ui_cached_text = self._render_ui_gateway_solver("``:STOP SPAMMING&``Try again later``````@~(ESCAPE) &Back", self.__client_ui_cached_text)
             return
 
 
@@ -1255,20 +1454,14 @@ class ClientGame:
 
         text += "&@~(ESCAPE)& BACK``"
 
-        self.entities["ui"] = render_text(text)
+        # -- Render UI once, update upon change ---
+        self.__client_ui_cached_text = self._render_ui_gateway_solver(text, self.__client_ui_cached_text)
+        pass
 
 
 
 # Entry
 if __name__ == "__main__":
-
-    # increase build version
-    if not running_as_exe():
-        with open("buildver.txt", "r+") as f:
-            new = int(f.read() or 0) + 1
-            f.seek(0), f.write(str(new)), f.truncate()
-
-
 
     # run the main game
     ClientGame().mainloop()

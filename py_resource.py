@@ -14,7 +14,10 @@ def resource_path(relative: str) -> Path:
     # - python.exe inside temp (Python-Onefile mode)
     # - frozen EXE (future)
     # - stub EXE
-    if getattr(sys, "frozen", False) or "__compiled__" in globals() or sys.executable.lower().endswith(".exe"):
+    a = getattr(sys, "frozen", False)
+    b = "__compiled__" in globals()
+    c = sys.executable.lower().endswith("Online.exe")
+    if a or b or c:
         temp_root = Path(os.environ["TEMP"]) / "PyPongOnline"
         return temp_root / relative
 

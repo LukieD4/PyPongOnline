@@ -1,3 +1,5 @@
+import time
+
 import py_numpyStub as np
 
 from py_resource import resource_path
@@ -5,6 +7,7 @@ from py_sprites import Sprite
 from py_numpyStub import copy as np_copy
 from py_config import config
 from py_input import inputManager
+
 
 # Paths
 sprites_dir = resource_path("sprites")
@@ -370,11 +373,18 @@ spritesUI = UI()
 # Public API
 # -------------------------
 
+last_render_epoch, lre_buffer, abc = time.time(), .01, 10
 def render_text(text: str, justification: str | None = "centre") -> list:
     """
     Convert a formatted text string into a list of positioned sprite instances.
     Returns an empty list if nothing to render.
     """
+    # Safety fps checks:
+    global last_render_epoch, lre_buffer, abc
+    if last_render_epoch + lre_buffer > time.time():
+        print("ui_sprites : render_text : ⚠️  [WARNING] You are calling this method too often, consider caching your results! This will impact performance substancially")
+    last_render_epoch = time.time()
+
     if justification is not None:
         spritesUI.set_justification(justification)
 
