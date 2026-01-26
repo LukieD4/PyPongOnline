@@ -218,7 +218,11 @@ class InputManager:
                 print(f"[🧿]  InputManager: DEBUG_INPUT_MODES couldn't find a matching mode for '{self.mode}'")
             return False
 
-        key_list = DEBUG_INPUT_MODES[self.mode].get(debug_action_name, [])
+        try:
+            key_list = DEBUG_INPUT_MODES[self.mode].get(debug_action_name, [])
+        except:
+            # print("py_input.py : get_debug_action : no `DEBUG_INPUT_MODES` available for `self.mode`")
+            return
 
         for key in key_list:
             if isinstance(key, str):
@@ -270,8 +274,6 @@ class InputManager:
 
     @staticmethod
     def controller_thumbstick(axis=None, threshold=None, direction=None):
-        if None in [axis,threshold,direction]:
-            print(f"⚠️  No input was passed into controller_thumbstick: axis: {axis}, threshold {threshold}, direction {direction}")
         def check_thumbstick():
             for i in range(pygame.joystick.get_count()):
                 joy = pygame.joystick.Joystick(i)
@@ -285,9 +287,14 @@ class InputManager:
                     return True
                 if direction == "down" and value > threshold:
                     return True
+                if direction == "left" and value < -threshold:
+                    return True
+                if direction == "right" and value > threshold:
+                    return True
 
             return False
         return check_thumbstick
+
 
 
 
@@ -330,6 +337,41 @@ INPUT_MODES = {
             "K_RIGHT",
             "K_d",
             InputManager.controller_button("dpad_right"),
+        ],
+    },
+
+    "pregame-cfg": {
+        "up": [
+            "K_UP",
+            "K_w",
+            InputManager.controller_thumbstick(axis="left_y", threshold=0.5, direction="up"),
+            InputManager.controller_button("dpad_up"),
+        ],
+        "down": [
+            "K_DOWN",
+            "K_s",
+            InputManager.controller_thumbstick(axis="left_y", threshold=0.5, direction="down"),
+            InputManager.controller_button("dpad_down"),
+        ],
+        "select": [
+            *InputManager.universal_select(),
+        ],
+        "sel-left": [
+            "K_LEFT",
+            "K_a",
+            InputManager.controller_thumbstick(axis="left_x", threshold=0.5, direction="left"),
+            InputManager.controller_button("dpad_left"),
+        ],
+
+        "sel-right": [
+            "K_RIGHT",
+            "K_d",
+            InputManager.controller_thumbstick(axis="left_x", threshold=0.5, direction="right"),
+            InputManager.controller_button("dpad_right"),
+        ],
+
+        "back": [
+            *InputManager.universal_back()
         ],
     },
 

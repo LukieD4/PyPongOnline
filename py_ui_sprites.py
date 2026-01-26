@@ -51,12 +51,25 @@ ABBREVIATION_TABLE = {
 REAL_SPACE = object()
 
 # Inline colour codes used in text strings
+NAMED_COLOURS = {
+    "RED": (255, 0, 0),
+    "GREEN": (0, 255, 0),
+    "YELLOW": (255, 255, 0),
+    "BLUE": (0, 0, 255),
+    "MAGENTA": (255, 0, 255),
+    "CYAN": (0, 255, 255),
+    "WHITE": (255, 255, 255),
+    "BLACK": (0, 0, 0),
+    "#": None,
+}
+
 colour_CODES = {
     ":": (255, 0, 0),      # red
     "#": (0, 255, 0),      # green
     "@": (255, 255, 0),    # yellow
     "&": None,             # reset / default
 }
+
 
 # -------------------------
 # UI base class
@@ -135,52 +148,84 @@ class UI(Sprite):
 
             ch = text[i]
 
-            # Dynamic input token: ~(literal_key)
-            if ch == "~" and i + 1 < length and text[i + 1] == "(":
-                end = text.find(")", i + 2)
-                if end != -1:
-                    literal_key = text[i + 2:end]
+            # Format token starting with ~
+            if ch == "~":
 
-                    # LONG LITERAL KEYS (e.g., "escape")
-                    if len(literal_key) > 1:
-                        # Controller mode: insert a single DynamicInput glyph
-                        if inputManager.last_input_method != "Default":
-                            dyn = DynamicInput()
-                            dyn.update_sprite(literal_key)
-                            self.text_array[row][col] = dyn
-                            col += 1
+                # -----------------------------------------
+                # Case 0: colour nullify token ~#
+                # -----------------------------------------
+                if i + 1 < length and text[i + 1] == "#":
+                    self.current_colour = None
+                    i += 2
+                    continue
+
+                # -----------------------------------------
+                # Case 1: dynamic literal ~(...)
+                # -----------------------------------------
+                if i + 1 < length and text[i + 1] == "(":
+                    end = text.find(")", i + 2)
+                    if end != -1:
+                        literal_key = text[i + 2:end]
+
+                        # LONG LITERAL KEYS
+                        if len(literal_key) > 1:
+                            if inputManager.last_input_method != "Default":
+                                dyn = DynamicInput()
+                                dyn.update_sprite(literal_key)
+                                self.text_array[row][col] = dyn
+                                col += 1
+                                i = end + 1
+                                continue
+
+                            expanded = ABBREVIATION_TABLE.get(literal_key.lower(), literal_key.lower())
+                            for ch2 in expanded.upper():
+                                if col >= config.MAX_COL:
+                                    row += 1
+                                    col = 0
+                                    if row >= config.MAX_ROW:
+                                        break
+                                self.text_array[row][col] = self.translateIntoClass(ch2)
+                                col += 1
+
                             i = end + 1
                             continue
 
-                        # Keyboard mode: expand into abbreviation or the literal text
-                        key = literal_key.lower()
-                        expanded = ABBREVIATION_TABLE.get(key, key)
-
-                        for ch2 in expanded.upper():
-                            if col >= config.MAX_COL:
-                                row += 1
-                                col = 0
-                                if row >= config.MAX_ROW:
-                                    break
-                            self.text_array[row][col] = self.translateIntoClass(ch2)
-                            col += 1
-
+                        # SINGLE-CHAR LITERAL
+                        dyn = DynamicInput()
+                        dyn.update_sprite(literal_key)
+                        self.text_array[row][col] = dyn
+                        col += 1
                         i = end + 1
                         continue
 
-                    # SINGLE-CHAR LITERAL (e.g., ~(c))
-                    dyn = DynamicInput()
-                    dyn.update_sprite(literal_key)
-                    self.text_array[row][col] = dyn
-                    col += 1
-                    i = end + 1
+                # -----------------------------------------
+                # Case 2: named colour token ~RED / ~GREEN / ~RESET
+                # -----------------------------------------
+                j = i + 1
+
+                # Scan ahead until a non-letter OR end of string
+                while j < length and text[j].isalpha():
+                    j += 1
+
+                token = text[i + 1:j].upper()
+
+                # Try to match the longest valid colour prefix
+                matched = None
+                for name in NAMED_COLOURS.keys():
+                    if token.startswith(name):
+                        matched = name
+                        break
+
+                if matched is not None:
+                    self.current_colour = NAMED_COLOURS[matched]
+                    i += 1 + len(matched)
                     continue
 
-            # colour codes
-            if ch in colour_CODES:
-                self.current_colour = colour_CODES[ch]
-                i += 1
-                continue
+
+                # -----------------------------------------
+                # Unknown ~TOKEN → treat '~' as literal
+                # -----------------------------------------
+
 
             # Newline/backtick
             if ch == "`":

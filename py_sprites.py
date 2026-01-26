@@ -19,11 +19,10 @@ class Sprite:
     #region __Init__
     def __init__(self):
         # (Float) Pixel coords
-        self.pos_x, self.pos_y = 0, 0
+        self.pos_x, self.pos_y, self.pos_x_previous, self.pos_y_previous = 0, 0, 0, 0
         self.pos_row, self.pos_col = 0,0
         # (Float) (consts)
         self.POS_X_OFFSET, self.POS_Y_OFFSET = 0, 0
-        self.POS_X_PREV, self.POS_Y_PREV = 0, 0
         
         # Spawned
         self.SUMMONED_POS_X, self.SUMMONED_POS_Y = 0, 0
@@ -38,6 +37,7 @@ class Sprite:
         # sprite resources
         self.spritesheet = [[sprites_dir / "missing.png"]]
         self.sprite_rect: pygame.Rect | None = None
+        self.sprite_rect_previous: pygame.Rect | None = None
         self.sprite_index = 0
         # don't tamper
         self._sprite_oscillator = 0
@@ -255,6 +255,18 @@ class Sprite:
     def draw(self, screen):
         if not self.surface_render:
             return
+        
+        # Check for any changes involving sprite shape or appearance
+        # if (
+        #     (self.pos_x != self.pos_x_previous) or
+        #     (self.pos_y != self.pos_y_previous) or
+        #     (self.sprite_rect != self.sprite_rect_previous)
+        # ):
+        #     self.pos_x_previous = self.pos_x
+        #     self.pos_y_previous = self.pos_y
+        #     self.sprite_rect_previous = self.sprite_rect
+        # else:
+        #     return
 
         # (Integer) Grids
         coord_grid = pixel_to_grid(int(self.pos_x),int(self.pos_y))

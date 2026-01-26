@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+# from pyinstrument import Profiler
+
+# profiler = Profiler()
+# profiler.start()
+
+
 import pygame, os, time, asyncio, websockets, queue, threading, json, sys, subprocess
 
 import py_sprites
@@ -121,11 +127,14 @@ class ClientGame:
         self.client_id_hash = sha256(gethostname().encode()).hexdigest()
 
         # --- mode ---
-        self.mode = "menu-init"
+        self.mode = None
         self.mode_old = None
+        self._mode_previous = None # updated via -> `def newMode():`
+        self.newMode("menu-init")
 
         # Main loop (while running:)
         self.debug = True
+        # self.debug = False
         self.debug_input_epoch = 0
         self.debug_overlay = False
         self.main_loop_frame_count = 0
@@ -149,10 +158,10 @@ class ClientGame:
         self.main_menu_invoke_resolution_changed = False
         self.main_menu_speaker = None
         self.menu_index = 0
-        self.menu_items = ["SOLO", "ONLINE", "SCREEN", "QUIT"]
+        self.menu_items = ["PLAY", "ARENAS", "SCREEN", "QUIT"]
         self.menu_actions = {
-            "SOLO": self.action_playOffline,
-            "ONLINE": self.action_playOnline,
+            "PLAY": self.action_playOffline,
+            "ARENAS": self.action_playOnline,
             "SCREEN": self.action_screen,
             "QUIT": self.action_quit,
         }
@@ -163,6 +172,14 @@ class ClientGame:
 
         # Main loop
         self.mainloop_halt_for_x_ticks = 0
+
+        # Pregame
+        self.pregame_cfg_tick = 0
+        self.pregame_cfg_list_index = 0
+        self.pregame_cfg_gamemodes = ["PONG","FOOSBALL","4-PONG"]
+        self.pregame_cfg_connections = ["ONLINE", "BOTS"]
+        self.pregame_cfg_cpu_difficulties = ["EASY", "NORMAL", "HARD"]
+        self._pregame_cfg_trigger_transition = False
 
         # Transition
         self.transition_tick = 0
@@ -230,6 +247,9 @@ class ClientGame:
             "menu": self.updateMainMenu,
             # "menu": self.initLobbyBrowser,
             # "menu": self.updateOfflineGame, # comment out later
+
+            "pregame-cfg-init": self.initPregameCfgScreen,
+            "pregame-cfg": self.updatePregameCfgScreen,
 
             # online
             "online-connect-init": self.initOnlineConnect,
@@ -348,13 +368,13 @@ class ClientGame:
         self.lobby_index = 0
 
         # switch mode
-        self.mode = "online-connect-init" # -> self.updateOnlineConnect
+        self.newMode("online-connect-init") # -> self.updateOnlineConnect
         self.start_network()
     
     def action_playOffline(self):
         # switch mode
-        self.mode = "transOFF-init"
-        self.transOFF_tick = 0
+        self.newMode("pregame-cfg-init")
+        # self.newMode("offline-game-init")
 
     def action_screen(self):
         self.rescaleWindow()
@@ -372,7 +392,7 @@ class ClientGame:
 
     def initMainMenu(self):
         self.main_menu_tick = 0
-        self.mode = "menu"
+        self.newMode("menu")
         self.entitiesAllDelete()
         self._invalidate_ui_caches()
 
@@ -402,8 +422,10 @@ class ClientGame:
 
             # Logo icon
             entities_demo.append(py_sprites.Logo().summon(target_row=1, target_col=8, screen=self.screen))
+
+            # Sync speaker
+            self.main_menu_speaker.sync_sprite_with_volume()
         
-        self.main_menu_speaker.sync_sprite_with_volume()
         
         # --- Demo gameplay ---
         for entity in self.entitiesAllReturn():
@@ -475,6 +497,9 @@ class ClientGame:
                 config.redefine(volume=new_sound_volume)
                 self.game_volume = new_sound_volume
 
+                # sync
+                self.main_menu_speaker.sync_sprite_with_volume()
+
                 # update menu input epoch
                 self.menu_input_epoch = now
 
@@ -486,6 +511,9 @@ class ClientGame:
                 new_sound_volume = round( min(1.0, self.game_volume + .1), 1)
                 config.redefine(volume=new_sound_volume)
                 self.game_volume = new_sound_volume
+
+                # sync
+                self.main_menu_speaker.sync_sprite_with_volume()
 
                 # update epoch
                 self.menu_input_epoch = now
@@ -505,11 +533,125 @@ class ClientGame:
         self.renderMenuText(volume=self.game_volume, justification="centre")
 
     # ========================================================
+    # Pregame configuration
+    #region Pregame Config
+
+    def initPregameCfgScreen(self):
+        self.pregame_cfg_tick = 0
+        self.pregame_row_index = 0  # which row is selected
+        self.pregame_cfg_list_index = 0  # for gamemode row
+        self.pregame_cfg_connection_index = 0
+        self.pregame_time_seconds = 60  # default 1 minute
+        self.pregame_cfg_cpu_index = 1  # NORMAL
+        self._pregame_cfg_trigger_transition = False
+
+        self.entitiesAllDelete()
+        self._invalidate_ui_caches()
+        self.newMode("pregame-cfg")
+
+
+    def updatePregameCfgScreen(self):
+        self.pregame_cfg_tick += 1
+        now = time.time()
+        keys = pygame.key.get_pressed()
+
+        # -- Should transition
+        if self._pregame_cfg_trigger_transition:
+            self.renderTransition("offline-game-init")
+            return
+
+        # --- First frame setup ---
+        if self.pregame_cfg_tick == 1:
+
+            # Create screen border
+            R, C = config.MAX_ROW, config.MAX_COL
+            deco, Cell = self.entities["decor"], py_sprites.Cell
+            for c in range(C):
+                deco += [Cell().summon(target_col=c,target_row=0,screen=self.screen), Cell().summon(target_col=c,target_row=R-1,screen=self.screen)]
+            for r in range(1, R-1):
+                deco += [Cell().summon(target_col=0,target_row=r,screen=self.screen), Cell().summon(target_col=C-1,target_row=r,screen=self.screen)]
+
+            # Force block input
+            self.menu_input_epoch = now
+
+        # --- Input handling ---
+        if now > self.menu_input_epoch:
+            moved = False
+            row = self.pregame_row_index
+
+            if inputManager.get_action("up", keys):
+                self.pregame_row_index = (row - 1) % 5; moved = True
+            elif inputManager.get_action("down", keys):
+                self.pregame_row_index = (row + 1) % 5; moved = True
+
+            elif inputManager.get_action("sel-left", keys) and row < 4:
+                moved = True
+                if   row == 0: self.pregame_cfg_connection_index ^= 1
+                elif row == 1: self.pregame_cfg_list_index = (self.pregame_cfg_list_index - 1) % len(self.pregame_cfg_gamemodes)
+                elif row == 2: self.pregame_time_seconds = max(30,  self.pregame_time_seconds - 30)
+                elif row == 3: self.pregame_cfg_cpu_index = (self.pregame_cfg_cpu_index - 1) % 3
+
+            elif inputManager.get_action("sel-right", keys) and row < 4:
+                moved = True
+                if   row == 0: self.pregame_cfg_connection_index ^= 1
+                elif row == 1: self.pregame_cfg_list_index = (self.pregame_cfg_list_index + 1) % len(self.pregame_cfg_gamemodes)
+                elif row == 2: self.pregame_time_seconds = min(180, self.pregame_time_seconds + 30)
+                elif row == 3: self.pregame_cfg_cpu_index = (self.pregame_cfg_cpu_index + 1) % 3
+
+            elif inputManager.get_action("select", keys) and row == 4:
+                self.menu_input_epoch = now + self.menu_input_cooldown
+                soundMixer.play("select", "audio/select.ogg", vol_mult=self.game_volume)
+                self._pregame_cfg_trigger_transition = True
+                return
+
+            if inputManager.get_action("back", keys):
+                self.newMode("menu-init")
+
+            if moved:
+                soundMixer.play("scroll", "audio/scroll.ogg", vol_mult=self.game_volume)
+                self.menu_input_epoch = now + self.menu_input_cooldown
+
+        # --- Build UI text ---
+        indent = "¬"
+        mins, secs = divmod(self.pregame_time_seconds, 60)
+
+        rows = [
+            ("~CYANMETHOD~#",   self.pregame_cfg_connections[self.pregame_cfg_connection_index]),
+            ("~CYANGAMEMODE~#", self.pregame_cfg_gamemodes[self.pregame_cfg_list_index]),
+            ("~CYANTIME~#",     f"{mins}'{secs:02d}"),
+            ("~CYANCPUS~#",     self.pregame_cfg_cpu_difficulties[self.pregame_cfg_cpu_index]),
+            ("",                "PLAY"),  # PLAY row
+        ]
+
+        def fmt(i, label, value):
+            # GAMEMODE + PLAY row
+            if i == 1:
+                gm_green  = (self.pregame_row_index == 1)
+                play_green = (self.pregame_row_index == 4)
+                pad = indent * 6
+
+                gm   = f"~GREEN< {value} >`~#" if gm_green else f"< {value} >`"
+                play = f"~GREEN< PLAY >`~#~(return)"    if play_green else f"< PLAY >`"
+
+                return f"``{indent}{label}`{indent}{gm}{pad}{play}"
+
+            # Normal rows
+            if i == self.pregame_row_index:
+                return f"``{indent}{label}`{indent}~GREEN< {value} >`~#"
+            return f"``{indent}{label}`{indent}< {value} >`"
+
+        final_text = f"``  ~YELLOWMATCH SETTINGS`" + "".join(fmt(i, *row) for i, row in enumerate(rows))
+        self.__client_ui_cached_text = self._render_ui_gateway_solver(final_text, self.__client_ui_cached_text, justification=None)
+
+
+
+
+    # ========================================================
     # Online Connect / Waiting
     #region OnlineConnect
     def initOnlineConnect(self):
         self.online_connect_tick = 0
-        self.mode = "online-connect"
+        self.newMode("online-connect")
         self.entitiesAllDelete()
 
     def updateOnlineConnect(self):
@@ -519,13 +661,13 @@ class ClientGame:
         if self.has_handshake_timeout():
             self.net_connected_epoch = time.time()
             self.net_last_epoch_attempt = 0
-            self.mode = "online-waiting-init" # -> self.initOnlineWaiting
+            self.newMode("online-waiting-init") # -> self.initOnlineWaiting
             
             return
         
         # Dev: the user forgot to launch their server
         if self.has_connection_refused():
-            self.__client_ui_cached_text = self._render_ui_gateway_solver(f"````(DEV)`Server settings failed```{self.net_last_error}`````@This screen is permanent``until restart.&",self.__client_ui_cached_text)
+            self.__client_ui_cached_text = self._render_ui_gateway_solver(f"````(DEV)`Server settings failed```{self.net_last_error}`````~YELLOWThis screen is permanent``until restart.~#",self.__client_ui_cached_text)
             return
         
         # Spawn ball
@@ -573,20 +715,20 @@ class ClientGame:
         if self.net_connected:
             soundMixer.play("connection_connected", "audio/connection_connected.ogg",vol_mult=self.game_volume)
             self.net_out.put(json.dumps({"type": "list_lobbies"}))
-            self.mode = "lobby-browser" # -> self.updateLobbyBrowser
+            self.newMode("lobby-browser") # -> self.updateLobbyBrowser
             return
 
         # Failsafe: eject to lost connection menu after timeout
         if self.online_connect_tick >= config.frame_rate * self.net_timeout/2:
-            self.mode = "lost-init" # -> self.updateLost
+            self.newMode("lost-init") # -> self.updateLost
             return
 
-        self.__client_ui_cached_text = self._render_ui_gateway_solver(f"``CONNECTING TO`¬@ONRENDER.COM{self.dots}``",self.__client_ui_cached_text)
+        self.__client_ui_cached_text = self._render_ui_gateway_solver(f"``CONNECTING TO`¬~YELLOWONRENDER.COM{self.dots}``",self.__client_ui_cached_text)
 
     #region OnlineWaiting
     def initOnlineWaiting(self):
         self.online_waiting_tick = 0
-        self.mode = "online-waiting"
+        self.newMode("online-waiting")
         self.entitiesAllDelete()
 
 
@@ -601,7 +743,7 @@ class ClientGame:
             self.net_last_epoch_attempt = 0
 
             self.net_out.put(json.dumps({"type": "list_lobbies"}))
-            self.mode = "lobby-browser" # -> self.updateLobbyBrowser
+            self.newMode("lobby-browser") # -> self.updateLobbyBrowser
             return
 
         # capture epoch of connection (INTEGER) a bit hacky but works
@@ -613,12 +755,12 @@ class ClientGame:
             self.dots = "." * ((self.ui_ellipse % 3) + 1)
 
             # change the colour of the elapsed time to indicate sent attempt
-            elapsed_net_out_colour = "@" if elapsed % self.net_rendercom_retry_s == 0 else ""
+            elapsed_net_out_colour = "~YELLOW" if elapsed % self.net_rendercom_retry_s == 0 else ""
 
             final_text = [
                  "``SERVER IS COLD BOOTING``"
                 f"``THIS MAY TAKE UP TO {self.net_rendercom_timeout} SECONDS.`BUT USUALLY TAKES 60`"
-                f"{elapsed_net_out_colour}({self.net_rendercom_timeout-elapsed})&`{self.dots}```#You're the only player online.`thanks for playing my game!"
+                f"{elapsed_net_out_colour}({self.net_rendercom_timeout-elapsed})~#`{self.dots}```~GREENYou're the only player online.`thanks for playing my game!"
             ]
             final_text = final_text[0]
 
@@ -631,12 +773,12 @@ class ClientGame:
 
             # Timeout (+check for edge case where it prevents telling the user that the connection failed if success)
             if elapsed >= self.net_rendercom_timeout and not self.net_connected:
-                self.mode = "online-offline"
+                self.newMode("online-offline")
 
     #region OnlineOffline
     def initOnlineOffline(self):
         self.online_offline_tick = 0
-        self.mode = "online-offline"
+        self.newMode("online-offline")
         self.entitiesAllDelete()
 
     def updateOnlineOffline(self):
@@ -644,17 +786,17 @@ class ClientGame:
 
         keys = pygame.key.get_pressed()
 
-        self.__client_ui_cached_text = self._render_ui_gateway_solver("```@(SERVER)`````PLEASE TRY AGAIN LATER````ESC BACK TO MENU``",self.__client_ui_cached_text)
+        self.__client_ui_cached_text = self._render_ui_gateway_solver("```~YELLOW(SERVER)`````PLEASE TRY AGAIN LATER````ESC BACK TO MENU``",self.__client_ui_cached_text)
 
         if inputManager.get_action("back", keys):
-            self.mode = "menu-init"
+            self.newMode("menu-init")
 
     # ========================================================
     # Lobby
     #region Lobby Browse
     def initLobbyBrowser(self):
         self.lobby_browser_tick = 0
-        self.mode = "lobby-browser"
+        self.newMode("lobby-browser")
         self.entitiesAllDelete()
 
     def updateLobbyBrowser(self):
@@ -701,7 +843,7 @@ class ClientGame:
                             soundMixer.play("lobby_leave", "audio/lobby_leave.ogg",vol_mult=self.game_volume)
 
                     case "start_game":
-                        self.mode = "transON-init"
+                        self.newMode("transON-init")
         
 
         # --- USER INTERACTIONS --
@@ -727,7 +869,7 @@ class ClientGame:
             self.lobby_input_epoch = now
 
         if inputManager.get_action("back", keys):
-            self.mode = "menu-init"
+            self.newMode("menu-init")
 
 
         # !! Gatekeep any further actions if CLIENT IS IN A LOBBY !!
@@ -784,7 +926,7 @@ class ClientGame:
         self.game_halt_for_x_ticks = 0
         self.game_goal_scored = False
         self.game_scores = [0,0,0,0]
-        self.mode = "online-game"
+        self.newMode("online-game")
 
 
     def updateOnlineGame(self):
@@ -815,7 +957,7 @@ class ClientGame:
         self.game_halt_for_x_ticks = 0
         self.game_goal_scored = False
         self.game_scores = [0,0,0,0]
-        self.mode = "offline-game"
+        self.newMode("offline-game")
 
     
 
@@ -852,7 +994,7 @@ class ClientGame:
             # - END GAME?
             if 3 in self.game_scores:
                 self.game_verdict = "END"
-                self.mode = "menu-init"
+                self.newMode("menu-init")
 
             # - respawn balls
             for ball in self.entities["balls"]:
@@ -983,7 +1125,7 @@ class ClientGame:
     def initLostConnectionMenu(self):
         self.net_lost_tick = 0
         soundMixer.play("connection_lost", "audio/connection_lost.ogg",vol_mult=self.game_volume)
-        self.mode = "lost"
+        self.newMode("lost")
         self.entitiesAllDelete()
         
 
@@ -995,7 +1137,7 @@ class ClientGame:
             self.net_connected = False
             self.net_wasConnected = False
             self.network_thread = None
-            self.mode = "menu-init"
+            self.newMode("menu-init")
 
     # ========================================================
     # Main Loop
@@ -1055,7 +1197,7 @@ class ClientGame:
                 
                 fps_percent = (self.main_loop_fps / 60) * 100
                 fps_final_text = [
-                    f"@FPS _ {self.main_loop_fps} ({fps_percent:.0f}P)`"
+                    f"~YELLOWFPS _ {self.main_loop_fps} ({fps_percent:.0f}P)`"
                     f"FPS UNLOCKED _ {config.frame_rate != 60}`"
                     f"VOL _ {config.volume_multiplier}`"
                     f"CONN _ {self.net_connected}`"
@@ -1096,7 +1238,7 @@ class ClientGame:
                 and self.mode not in ("lost", "lost-init", "online-waiting", "online-offline")
                 and not self.has_handshake_timeout()
             ):
-                self.mode = "lost-init"
+                self.newMode("lost-init")
 
 
             # Mode dispatch
@@ -1152,10 +1294,19 @@ class ClientGame:
                     
 
         pygame.quit()
+        # profiler.stop()
+        # profiler.open_in_browser()
 
     # ========================================================
     # Utilities
     #region Utilities
+    def newMode(self,new_mode):
+        if new_mode != self.mode:
+            self._mode_previous = self.mode
+            self.mode = new_mode
+        else:
+            print("py_client : newMode : mode already is", self.mode)
+
     def rescaleWindow(self):
         
         # Grab new scale based on desktop resolution
@@ -1396,7 +1547,7 @@ class ClientGame:
             if not ui_entities:
                 # Transition complete
                 self.transition_frame_count = 0
-                self.mode = new_mode
+                self.newMode(new_mode)
                 print(f"renderTransition : switching to new mode : {self.mode}")
                 self.transition_spawned_cols = 0
                 self.transition_spawned_rows = 0
@@ -1406,13 +1557,14 @@ class ClientGame:
 
     def renderMenuText(self, volume=None, justification=None):
 
-        title = f"`````````````&"
+        title = f"`````````````~#"
         controller_guide = "~(return)"
         body = ""
 
         for i, item in enumerate(self.menu_items):
-            prefix = f"#> " if i == self.menu_index else "&  "
-            suffix = f"#<{controller_guide}" if i == self.menu_index else "&  "
+            if item == "ARENAS": item = f"~CYAN{item}"
+            prefix = f"~GREEN> " if i == self.menu_index else "~#  "
+            suffix = f"~GREEN<{controller_guide}" if i == self.menu_index else "~#  "
             body += f"{prefix}{item} {suffix}``"
 
         # -- Render UI once, update upon change ---
@@ -1423,7 +1575,7 @@ class ClientGame:
 
         # -- Punish rate limiter
         if self.net_is_rate_limited:
-            self.__client_ui_cached_text = self._render_ui_gateway_solver("``:STOP SPAMMING&``Try again later``````@~(ESCAPE) &Back", self.__client_ui_cached_text)
+            self.__client_ui_cached_text = self._render_ui_gateway_solver("``~REDSTOP SPAMMING~#``Try again later``````~YELLOW~(ESCAPE) ~#Back", self.__client_ui_cached_text)
             return
 
 
@@ -1435,24 +1587,24 @@ class ClientGame:
             # Highlight current lobby
             is_current = lobby["id"] == self.lobby_id
             if is_current:
-                prefix = "@(YOU) "
+                prefix = "~YELLOW(YOU) "
             else:
                 # else, highlight selection if not in a lobby
-                prefix = "#> " if i == self.lobby_index and not self.lobby_id else "&  "
+                prefix = "~GREEN> " if i == self.lobby_index and not self.lobby_id else "~#  "
             text += f"{prefix}{lobby['name']} ({lobby['players']}/{lobby['max_players']})``"
 
         # Bottom UI
         if self.lobby_id:
             text += (
                 "````"
-                "&@~(L)& LEAVE LOBBY``"
-                f"&({self.lobby_name})``"
+                "~#~YELLOW~(L)~# LEAVE LOBBY``"
+                f"~CYAN({self.lobby_name})~#``"
             )
         else:
-            text += "````&@~(C)& CREATE LOBBY``"
+            text += "````~#~YELLOW~(C)~# CREATE LOBBY``"
 
 
-        text += "&@~(ESCAPE)& BACK``"
+        text += "~#~YELLOW~(ESCAPE)~# BACK``"
 
         # -- Render UI once, update upon change ---
         self.__client_ui_cached_text = self._render_ui_gateway_solver(text, self.__client_ui_cached_text)
