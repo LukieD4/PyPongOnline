@@ -516,6 +516,60 @@ class OutOfBounds(Goal):
 
 
 
+#region Particle
+class Particle(Sprite):
+    def __init__(self):
+        super().__init__()
+        self.spritesheet = [[sprites_dir / "missing.png"]]
+        self.lifetime = 3 * config.frame_rate  # frames
+    
+    def decay(self):
+        self.lifetime -= 1
+        if self.lifetime <= 0:
+            self.mark_for_deletion = True
+
+
+class Confetti(Particle):
+    def __init__(self):
+        super().__init__()
+        self.team = "particles"
+
+        variation = randint(1,2)
+        self.spritesheet = [[sprites_dir / "particle" / f"confetti{variation}.png"]]
+
+        # Random offset
+        self.POS_X_OFFSET = randint(-4, 4)
+        self.POS_Y_OFFSET = randint(-4, 4)
+
+        # Fall origin
+        self._fall_origin_x = self.pos_x
+        self._fall_origin_y = self.pos_y
+
+        # Dominant Colour
+        white_dominant = (randint(0,2) == 1)
+        colour_values = [255, randint(50, 100), randint(50, 100)] if not white_dominant else [255,255,255]
+        random.shuffle(colour_values)
+        self.set_sprite(0, 0, recolour=tuple(colour_values))
+        
+        self._position_initialized = False
+
+    def task(self, game_ball_last_position):
+        
+        # Random horizontal drift velocity (splatter effect)
+        self.drift_x = randint(-1, 1)
+        self.drift_y = randint(1, 2)  # always falls down
+
+        # Set position once from game_ball_last_position
+        if not self._position_initialized:
+            self.move_position(dx=game_ball_last_position[0], dy=game_ball_last_position[1], set_position=True)
+            self._position_initialized = True
+        
+        # Apply splatter drift (random horizontal + downward fall)
+        self.move_position(dx=self.drift_x, dy=self.drift_y)
+        self.decay()
+        super().task()
+
+
 
 
 #region Dummy
@@ -597,7 +651,7 @@ class CPUPlayer(Dummy):
         dy_to_ball = ball.pos_y - self.pos_y
 
         # Deadzone to avoid jitter
-        DEADZONE = self.speed+4
+        DEADZONE = self.speed*2
         if abs(dy_to_ball) < DEADZONE:
             return
 
@@ -614,7 +668,7 @@ class CPUPlayer(Dummy):
         # If applying dy would go out of bounds, cancel it
         new_y = self.pos_y + dy
         if new_y < top_limit or new_y > bottom_limit:
-            dy = 0
+            dy = 1 * direction * self.speed  # try moving in the opposite direction
 
         # Apply delta movement (NOT absolute)
         self.move_position(dy=dy)

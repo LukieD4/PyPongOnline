@@ -1,4 +1,4 @@
-import time
+import time, threading
 
 import py_numpyStub as np
 
@@ -44,6 +44,18 @@ TRANSLATION_TABLE = {
 ABBREVIATION_TABLE = {
     "escape": "esc",
     "return": "",
+
+    # Thumbstick nullifier
+    "ltsp": "",
+    "ltsu": "",
+    "ltsr": "",
+    "ltsd": "",
+    "ltsl": "",
+    "rtsp": "",
+    "rtsu": "",
+    "rtsr": "",
+    "rtsd": "",
+    "rtsl": "",
     # add more as needed: "backspace": "bsp", "enter": "ent", etc.
 }
 
@@ -419,10 +431,46 @@ spritesUI = UI()
 # -------------------------
 
 last_render_epoch, lre_buffer, abc = time.time(), .01, 10
-def render_text(text: str, justification: str | None = "centre") -> list:
+
+# --- Background rendering helper objects ---
+class RenderFuture:
     """
-    Convert a formatted text string into a list of positioned sprite instances.
-    Returns an empty list if nothing to render.
+    Simple future-like handle returned by background render requests.
+    - call .done() to check completion
+    - call .result(timeout=None) to block until result is ready (or raise exception)
+    - .exception() returns exception if one occurred, else None
+    """
+    def __init__(self):
+        self._event = threading.Event()
+        self._result = None
+        self._exc = None
+
+    def set_result(self, value):
+        self._result = value
+        self._event.set()
+
+    def set_exception(self, exc):
+        self._exc = exc
+        self._event.set()
+
+    def done(self):
+        return self._event.is_set()
+
+    def result(self, timeout=None):
+        finished = self._event.wait(timeout)
+        if not finished:
+            raise TimeoutError("RenderFuture: result not ready")
+        if self._exc:
+            raise self._exc
+        return self._result
+
+    def exception(self):
+        return self._exc
+
+def _render_text_sync(text: str, justification: str | None = "centre") -> list:
+    """
+    Internal synchronous renderer. This contains the original render logic
+    and is used by both the blocking API and the background worker.
     """
     # Safety fps checks:
     global last_render_epoch, lre_buffer, abc
@@ -456,3 +504,36 @@ def render_text(text: str, justification: str | None = "centre") -> list:
             spawned_sprites.append(spawned)
 
     return spawned_sprites
+
+def render_text(text: str, justification: str | None = "centre") -> list:
+    """
+    Convert a formatted text string into a list of positioned sprite instances.
+    Returns an empty list if nothing to render.
+
+    This is the original synchronous API preserved for compatibility.
+    """
+    return _render_text_sync(text, justification)
+
+def render_text_background(text: str, justification: str | None = "centre") -> RenderFuture:
+    """
+    Enqueue a background render job and return a RenderFuture handle.
+
+    The background worker is implemented as a short-lived daemon thread per request.
+    The thread will exit automatically once the job completes (daemon ensures it
+    won't block process shutdown). Use .result() on the returned handle to obtain
+    the spawned sprites list when ready.
+    """
+    future = RenderFuture()
+
+    def _worker():
+        try:
+            result = _render_text_sync(text, justification)
+            future.set_result(result)
+        except Exception as e:
+            future.set_exception(e)
+
+    # Start a short-lived daemon thread for this render job.
+    # It will die as soon as the work completes.
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    return future

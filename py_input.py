@@ -18,8 +18,18 @@ DEFAULT_CONTROLLER_BUTTON_MAP = {
     "dpad_right": 14,
 }
 
+# Thumbstick direction mappings
+THUMBSTICK_DIRECTIONS = {
+    "up": ("_y", "up"),
+    "down": ("_y", "down"),
+    "left": ("_x", "left"),
+    "right": ("_x", "right"),
+}
+
+THUMBSTICK_SIDES = ["left", "right"]
+
+# Build CROSS_PLATFORM_SPRITE_MAP automatically
 CROSS_PLATFORM_SPRITE_MAP = {
-    # RESOLVES THE IMAGES (e.g. xbx_a.png)
     "XBOX": {
         "a": "xbx_a",
         "b": "xbx_b",
@@ -39,8 +49,18 @@ CROSS_PLATFORM_SPRITE_MAP = {
         "rb": "psn_r2",
         "back": "psn_back",
         "start": "psn_select",
-        },
+    },
 }
+# Add thumbstick mappings
+for family, sprites in CROSS_PLATFORM_SPRITE_MAP.items():
+    for side in THUMBSTICK_SIDES:
+        for direction, (axis_suffix, dir_name) in THUMBSTICK_DIRECTIONS.items():
+            key = f"{side}{axis_suffix}_{direction}"
+            prefix = "LeftTS" if side == "left" else "RightTS"
+            suffix = {"up": "U", "down": "D", "left": "L", "right": "R"}[direction]
+            sprites[key] = f"{prefix}_{suffix}"
+    sprites["left_press"] = "LeftTS_P"
+    sprites["right_press"] = "RightTS_P"
 
 CONTROLLER_AXIS_MAP = {
     "left_x": 0,
@@ -148,12 +168,54 @@ class InputManager:
 
     #region Sprite resolver 
     def get_sprite_for_keyboard_key(self, keyboard_key):
+        """
+        Return the controller sprite name for a long keyboard token (e.g. 'escape',
+        'leftthumbdown', etc.) when a controller is the last input method.
+
+        This now handles thumbstick tokens directly (leftthumb*/rightthumb*)
+        and falls back to the existing translate_keyboard_key_to_controller_key()
+        behavior for button keys.
+        """
         if self.last_input_method == "Default":
             return None
 
+        k = keyboard_key.lower()
+
+        # Direct thumbstick mapping (bypass INPUT_MODES dependency)
+        # e.g. 'ltsd' -> 'left_y_down' -> CROSS_PLATFORM_SPRITE_MAP[...] -> 'LeftTS_D' -> +.png
+        if k.startswith("lts") or k.startswith("rts"):
+            side = "left" if k.startswith("lts") else "right"
+            # Extract direction from thumbstick key (e.g., 'leftthumbup' -> 'up')
+            direction = k.replace(f"{side}thumb", "")[-1]
+            
+            match direction:
+                case "u":
+                    mapped = f"{side}_y_up"
+                case "d":
+                    mapped = f"{side}_y_down"
+                case "l":
+                    mapped = f"{side}_x_left"
+                case "r":
+                    mapped = f"{side}_x_right"
+                case "p":
+                    mapped = f"{side}_press"
+                case _:
+                    mapped = None
+
+            if mapped:
+                family = self.get_controller_family()
+                if family is None:
+                    return None
+                return CROSS_PLATFORM_SPRITE_MAP[family].get(mapped)
+
+        # Fallback: existing logic (buttons / other keys)
         button = self.translate_keyboard_key_to_controller_key(keyboard_key)
         if button is None:
             return None
+
+        if isinstance(button, tuple):
+            axis, threshold, direction = button
+            button = f"{axis}_{direction}"
 
         family = self.get_controller_family()
         if family is None:
@@ -167,22 +229,30 @@ class InputManager:
         
         # Santise to PyGame formatting
         keyboard_key = keyboard_key.upper() if len(keyboard_key) > 1 else keyboard_key.lower()
-        keyboard_key = f"K_{keyboard_key}" if not keyboard_key.startswith("K_") else keyboard_key
-            
+        key_input_is_thumbstick = "THUMB" in keyboard_key
+        if not key_input_is_thumbstick: # thumbsticks get unique naming convention
+            keyboard_key = f"K_{keyboard_key}" if not keyboard_key.startswith("K_") else keyboard_key
+
 
         mode_map = INPUT_MODES[self.mode]
 
         for action_name, key_list in mode_map.items():
 
-            if keyboard_key not in key_list:
+            if (keyboard_key not in key_list) and not key_input_is_thumbstick:
                 continue
 
             for key in key_list:
+
                 if callable(key) and hasattr(key, "__closure__") and key.__closure__:
+                    
+                    axis = threshold = direction = None
                     for cell in key.__closure__:
                         val = cell.cell_contents
                         if isinstance(val, str) and val in DEFAULT_CONTROLLER_BUTTON_MAP:
                             return val
+                        
+                else:
+                    continue
 
             return None
 
@@ -451,17 +521,20 @@ INPUT_MODES = {
 #region DEBUG_MODES
 DEBUG_INPUT_MODES = {
     "menu": {
-        "toggle_fps": [
+        "toggle_whole_ui": [
             "K_F1"
         ],
-        "unlock_fps": [
+        "toggle_overlay": [
             "K_F2"
         ],
-        "custom_fps": [
+        "unlock_fps": [
             "K_F3"
         ],
-        "custom_fps_impact": [
+        "custom_fps": [
             "K_F4"
+        ],
+        "custom_fps_impact": [
+            "K_F5"
         ],
     },
 
